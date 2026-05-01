@@ -12,8 +12,14 @@ from docx import Document
 
 # load .txt
 def loadTxt(path):
-	with open(path, "r", encoding="utf-8") as f:
-		return f.read()
+	encodings = ["utf-8", "utf-8-sig", "cp1252", "latin-1"]
+	for encodingName in encodings:
+		try:
+			with open(path, "r", encoding=encodingName) as f:
+				return f.read()
+		except UnicodeDecodeError:
+			continue
+	raise UnicodeDecodeError("Could not decode text file with supported encodings")
 
 # load .pdf
 def loadPdf(path):
@@ -49,4 +55,5 @@ def loadDocument(path):
 		raise ValueError(f"Unsupported file type: {ext}")
 
 # - - - - - - - - - - #
+
 

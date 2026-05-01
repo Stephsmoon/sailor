@@ -25,6 +25,22 @@ def getSectionName(chunkKey):
 
 	return chunkKey
 
+# make a plain copy of a summary dictionary for logging
+def copySummaryDict(summaries):
+	copiedSummaries = {}
+
+	for summaryName, summaryText in summaries.items():
+		copiedSummaries[str(summaryName)] = str(summaryText)
+
+	return copiedSummaries
+
+# add one repeat/reduction entry to the optional log
+def addReductionLog(reductionLog, entry):
+	if reductionLog == None:
+		return
+
+	reductionLog.append(entry)
+
 # combine summaries by section
 def combineSectionSummaries(summaries):
 	groupedSummaries = {}
@@ -86,7 +102,10 @@ def reduceSections(
 	enableThinking=False,
 	repetitionPenalty=1.05,
 	noRepeatNgramSize=0,
-	qualityPolish=False
+	qualityPolish=False,
+	reductionLog=None,
+	reductionRunName="repeat",
+	reductionRound=1
 ):
 	combinedSections = combineSectionSummaries(summaries)
 	reducedSummaries = {}
@@ -128,6 +147,18 @@ def reduceSections(
 
 		reducedSummaries[sectionName] = sectionSummary[sectionName]
 
+		addReductionLog(reductionLog, {
+			"runName": reductionRunName,
+			"stage": "section-reduction",
+			"round": reductionRound,
+			"deviceId": deviceId,
+			"sectionName": sectionName,
+			"inputKeys": list(sectionPieces),
+			"inputSummaries": copySummaryDict({key: summaries[key] for key in sectionPieces}),
+			"combinedInput": combinedText,
+			"outputSummaries": copySummaryDict(sectionSummary)
+		})
+
 	return reducedSummaries
 
 # merge all summaries into one text block
@@ -161,7 +192,9 @@ def reducePaper(
 	enableThinking=False,
 	repetitionPenalty=1.05,
 	noRepeatNgramSize=0,
-	qualityPolish=False
+	qualityPolish=False,
+	reductionLog=None,
+	reductionRunName="repeat"
 ):
 	currentText = mergeAllSummaries(summaries)
 	roundCount = 0
@@ -191,6 +224,16 @@ def reducePaper(
 				noRepeatNgramSize=noRepeatNgramSize,
 				qualityPolish=qualityPolish
 			)
+
+			addReductionLog(reductionLog, {
+				"runName": reductionRunName,
+				"stage": "paper-final-reduction",
+				"round": roundCount + 1,
+				"deviceId": deviceId,
+				"inputText": currentText,
+				"inputSummaries": copySummaryDict(finalInput),
+				"outputSummaries": copySummaryDict(finalSummary)
+			})
 
 			return finalSummary
 
@@ -234,7 +277,20 @@ def reducePaper(
 			qualityPolish=qualityPolish
 		)
 
-		currentText = mergeAllSummaries(reducedSummaries)
+		newCurrentText = mergeAllSummaries(reducedSummaries)
+
+		addReductionLog(reductionLog, {
+			"runName": reductionRunName,
+			"stage": "paper-rechunk-reduction",
+			"round": roundCount + 1,
+			"deviceId": deviceId,
+			"inputText": currentText,
+			"rechunkedInput": copySummaryDict(rechunkInput),
+			"outputSummaries": copySummaryDict(reducedSummaries),
+			"mergedOutputText": newCurrentText
+		})
+
+		currentText = newCurrentText
 		roundCount += 1
 
 	finalInput = {
@@ -261,6 +317,16 @@ def reducePaper(
 		qualityPolish=qualityPolish
 	)
 
+	addReductionLog(reductionLog, {
+		"runName": reductionRunName,
+		"stage": "paper-max-round-final-reduction",
+		"round": maxRounds + 1,
+		"deviceId": deviceId,
+		"inputText": currentText,
+		"inputSummaries": copySummaryDict(finalInput),
+		"outputSummaries": copySummaryDict(finalSummary)
+	})
+
 	return finalSummary
 
 # full reduce pipeline
@@ -285,9 +351,12 @@ def repeatSummaries(
 	enableThinking=False,
 	repetitionPenalty=1.05,
 	noRepeatNgramSize=0,
-	qualityPolish=False
+	qualityPolish=False,
+	reductionLog=None,
+	reductionRunName="repeat"
 ):
 	currentSummaries = summaries
+	sectionRound = 1
 
 	while hasMultiPartSections(currentSummaries):
 		currentSummaries = reduceSections(
@@ -307,8 +376,13 @@ def repeatSummaries(
 			enableThinking=enableThinking,
 			repetitionPenalty=repetitionPenalty,
 			noRepeatNgramSize=noRepeatNgramSize,
-			qualityPolish=qualityPolish
+			qualityPolish=qualityPolish,
+			reductionLog=reductionLog,
+			reductionRunName=reductionRunName,
+			reductionRound=sectionRound
 		)
+
+		sectionRound += 1
 
 	finalSummary = reducePaper(
 		currentSummaries,
@@ -331,7 +405,9 @@ def repeatSummaries(
 		enableThinking=enableThinking,
 		repetitionPenalty=repetitionPenalty,
 		noRepeatNgramSize=noRepeatNgramSize,
-		qualityPolish=qualityPolish
+		qualityPolish=qualityPolish,
+		reductionLog=reductionLog,
+		reductionRunName=reductionRunName
 	)
 
 	return currentSummaries, finalSummary
