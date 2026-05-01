@@ -22,25 +22,29 @@ REPEAT_CHAR_LIMIT = 20000
 
 # load simple .env key=value pairs without making python-dotenv required
 def loadEnvFile(envPath=".env"):
+	# validate path/file
 	if envPath == None or envPath.strip() == "":
 		return
-
 	if not os.path.exists(envPath):
 		return
 
+	# read file line-by-line
 	with open(envPath, "r", encoding="utf-8") as f:
 		for line in f:
+			# clear whitespace
 			line = line.strip()
 
+			# skip empty lines and comments
 			if line == "" or line.startswith("#"):
 				continue
 
+			# support "export KEY=value" syntax
 			if line.startswith("export "):
 				line = line[7:].strip()
-
+			# ensure line contains "="
 			if "=" not in line:
 				continue
-
+			# split into key and value
 			key, value = line.split("=", 1)
 			key = key.strip()
 			value = value.strip()
@@ -48,30 +52,36 @@ def loadEnvFile(envPath=".env"):
 			if key == "":
 				continue
 
+			# remove inline comments
 			if " #" in value:
 				value = value.split(" #", 1)[0].strip()
 
+			# remove surrounding quotes
 			if len(value) >= 2:
 				if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
 					value = value[1:-1]
 
+			# only set variable if it's not already in the env
 			if key not in os.environ:
 				os.environ[key] = value
 
+# try multiple environment variable names, return first one that exists
 def getEnvValue(names, defaultValue=None):
 	for name in names:
 		value = os.getenv(name)
 		if value != None and value.strip() != "":
 			return value.strip()
-
+	# default if none are found
 	return defaultValue
 
 # - - - - - - - - - - #
 
+# read string as a bool value
 def strToBool(value):
 	if isinstance(value, bool):
 		return value
 
+	# convert to lower case
 	value = value.lower().strip()
 
 	if value in ["true", "t", "yes", "y", "1"]:
@@ -79,66 +89,84 @@ def strToBool(value):
 	if value in ["false", "f", "no", "n", "0"]:
 		return False
 
+	# if string can't be read as either true or false
 	raise argparse.ArgumentTypeError("Boolean value expected: true or false")
 
+# turn a comma-separated string into a list
 def parseList(value):
+	# check if string is empty or "none"
 	if value == None:
 		return None
-
 	value = value.strip()
-
 	if value == "" or value.lower() == "none":
 		return None
 
+	# split string by comma
 	items = []
 	for item in value.split(","):
 		item = item.strip()
 		if item != "":
 			items.append(item)
 
+	# if resulting list is empty
 	if len(items) == 0:
 		return None
 
 	return items
 
+# converts comma-separated string into integers
 def parseIntList(value):
+	# convert into list, numbers remain as string
 	items = parseList(value)
-
+	# check if list is empty
 	if items == None:
 		return None
 
+	# convert into integers
 	intItems = []
 	for item in items:
 		intItems.append(int(item))
 
 	return intItems
 
+# create a filesystem-safe name
 def makeSafeName(name):
+	# extract base name without file extension
 	name = os.path.splitext(os.path.basename(name))[0]
+	# replace non-alphanumeric characters with "_"
 	name = re.sub(r'[^A-Za-z0-9_-]+', '_', name)
+	# strip leading or trailing "_"
 	name = name.strip("_")
 
+	# if base name is empty, use default name
 	if name == "":
 		name = "document"
 
 	return name
 
+# create a human-friendly name
 def makeDisplayName(path):
+	# grab file's base name without file extension
 	baseName = os.path.splitext(os.path.basename(path))[0]
+	# insert spaces where "_" and "-" occur
 	baseName = baseName.replace("_", " ").replace("-", " ")
+	# capitalize first character of each word
 	return baseName.title()
 
+# prevents multiple inputs from having identical names
 def makeUniqueNames(inputPaths):
 	nameCounts = {}
 	uniqueNames = []
 
 	for inputPath in inputPaths:
+		# create filesystem-safe name
 		baseName = makeSafeName(inputPath)
 
 		if baseName not in nameCounts:
 			nameCounts[baseName] = 0
 			uniqueNames.append(baseName)
 		else:
+			# duplicate names have an incrementing number appended to the end
 			nameCounts[baseName] += 1
 			uniqueNames.append(baseName + "_" + str(nameCounts[baseName]))
 
@@ -146,62 +174,65 @@ def makeUniqueNames(inputPaths):
 
 # - - - - - - - - - - #
 
+# read commandline inputs
 def parseArgs():
+	# load environment and define model
 	loadEnvFile(".env")
 	envModelName = getEnvValue(["MODEL_NAME", "MODEL", "HF_MODEL_NAME"], "Qwen/Qwen2.5-7B-Instruct")
 
 	parser = argparse.ArgumentParser(description="LLM Summarization Pipeline")
 
-	# input / output
+	# input
 	parser.add_argument(
 		"--input",
 		required=True,
 		nargs="+",
 		help="Path to one or more input files (txt/pdf/docx)"
 	)
-
+	# output
 	parser.add_argument(
 		"--output",
 		default="storage",
 		help="Output directory (default: storage)"
 	)
-
+	# file name of output
 	parser.add_argument(
 		"--outputName",
 		default=None,
 		help="Base name for final output files"
 	)
-
+	# title for output
 	parser.add_argument(
 		"--title",
 		default=None,
 		help="Title for final survey output"
 	)
-
+	# output author name
 	parser.add_argument(
 		"--authorName",
 		default="Stephan DeLuna",
 		help="Author name for final survey output"
 	)
-
+	# abstract text for output
 	parser.add_argument(
 		"--abstractText",
 		default="",
 		help="Optional abstract text for final survey output"
 	)
-
+	# introduction text for output
 	parser.add_argument(
 		"--introductionText",
 		default=None,
 		help="Optional introduction text for final survey output"
 	)
-
+	# conclusion text for output
 	parser.add_argument(
 		"--conclusionText",
 		default=None,
 		help="Optional conclusion text for final survey output"
 	)
-
+	# REMOVE. SKIPWAITS NOT BEING USED
+	# skip pauses in pipeline
 	parser.add_argument(
 		"--skipWaits",
 		type=strToBool,
@@ -278,6 +309,8 @@ def parseArgs():
 
 # - - - - - - - - - - #
 
+# REMOVE. SKIPWAITS NOT BEING USED
+# if skipWaits is enabled, function is used to create pauses
 def waitForNextStep(stepName, skipWaits=False):
 	if skipWaits:
 		return
@@ -287,10 +320,12 @@ def waitForNextStep(stepName, skipWaits=False):
 		if userInput == " ":
 			break
 
+# function to save text
 def saveText(path, text):
 	with open(path, "w", encoding="utf-8") as f:
 		f.write(text)
 
+# function to save chunks
 def saveChunks(path, chunks):
 	with open(path, "w", encoding="utf-8") as f:
 		for k, v in chunks.items():
@@ -298,6 +333,7 @@ def saveChunks(path, chunks):
 			f.write("-" * 40 + "\n")
 			f.write(v + "\n\n")
 
+# function to save summaries
 def saveSummaries(path, summaries):
 	with open(path, "w", encoding="utf-8") as f:
 		for k, v in summaries.items():
@@ -307,18 +343,23 @@ def saveSummaries(path, summaries):
 
 # - - - - - - - - - - #
 
+# grab integer list of available devices
 def getDeviceIds(args):
 	deviceIds = parseIntList(args.parallelDevices)
 
+	# check if no devices
 	if deviceIds == None or len(deviceIds) == 0:
 		deviceIds = [args.deviceId]
 
 	return deviceIds
 
+# prompt passed to LLM to create final survey paper
 def getSurveyPromptText(args, isMultiFile):
+	# use prompt provided in commandline, if any
 	if args.surveyPromptText != None:
 		return args.surveyPromptText
 
+	# if multiple files are used
 	if isMultiFile:
 		return (
 			"Write the survey synthesis in English only. "
@@ -329,22 +370,27 @@ def getSurveyPromptText(args, isMultiFile):
 			"Use a clear academic tone. "
 			"Keep the synthesis under 8 sentences."
 		)
-
+	# if single file
 	return args.promptText
 
+# default introduction text
 def getDefaultIntroductionText(fileInfos):
+	# single file
 	if len(fileInfos) == 1:
 		return "This report summarizes the provided document using a multi-stage LLM pipeline."
-
+	# multiple files
 	return "This report summarizes multiple provided documents using a multi-stage LLM pipeline and synthesizes their shared themes into a survey-style overview."
-
+# default conclusion text
 def getDefaultConclusionText(fileInfos):
+	# single file
 	if len(fileInfos) == 1:
 		return "This summary condenses the full document into a concise overview."
-
+	# multiple files
 	return "This summary condenses the full document set into a concise overview while preserving individual source summaries for review."
 
+# generate LLM prompt for creating introduction text
 def getIntroductionPromptText(args):
+	# use user-provided prompt if any
 	if args.introductionPromptText != None:
 		return args.introductionPromptText
 
@@ -357,7 +403,9 @@ def getIntroductionPromptText(args):
 		"Do not use bullet points or headings."
 	)
 
+# generate LLM prompt for creating conclusion text
 def getConclusionPromptText(args):
+	# use user-provided prompt if any
 	if args.conclusionPromptText != None:
 		return args.conclusionPromptText
 
@@ -370,11 +418,14 @@ def getConclusionPromptText(args):
 		"Do not use bullet points or headings."
 	)
 
+# build context for LLM in order to generate introduction and/or conclusion text
 def buildReportContext(fileInfos, combinedSummaryText):
+	# give complete summary for all files
 	contextText = "Survey Synthesis:\n"
 	contextText += combinedSummaryText.strip() + "\n\n"
-	contextText += "Individual Document Summaries:\n"
 
+	# separately display summaries for each document for clarity
+	contextText += "Individual Document Summaries:\n"
 	for fileInfo in fileInfos:
 		contextText += fileInfo["displayName"] + ":\n"
 		contextText += fileInfo["finalSummaryText"].strip() + "\n\n"
@@ -383,12 +434,16 @@ def buildReportContext(fileInfos, combinedSummaryText):
 
 # - - - - - - - - - - #
 
+# run pipeline on input file(s)
 def processInputFile(inputPath, outputDir, outputBaseName, args):
+	# create file paths for created files to be passed between modules
 	cleanedOutputPath = os.path.join(outputDir, f"{outputBaseName}_cleaned.txt")
 	chunkOutputPath = os.path.join(outputDir, f"{outputBaseName}_chunks.txt")
 
 	# --- INGEST ---
+	# extract text from file
 	rawText = loadDocument(inputPath)
+	# clean the text
 	tokens, removedCitations, removedMorphemes = cleanContent(
 		rawText,
 		removeCitation=args.removeCitation,
@@ -403,18 +458,11 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		morphemeList=parseList(args.morphemeList)
 	)
 	cleanedText = joinTokens(tokens)
-
+	# save cleaned text
 	saveText(cleanedOutputPath, cleanedText)
 
-	print("\n--- AFTER INGEST ---")
-	print("Input:", inputPath)
-	print("Length:", len(cleanedText))
-	print("Removed citations:", len(removedCitations))
-	print("Removed morpheme words:", len(removedMorphemes))
-	print("First 500 Char Cleaned")
-	print(cleanedText[:500])
-
 	# --- CHUNK ---
+	# separate cleaned text into chunks
 	chunks = chunkText(
 		cleanedText,
 		charLimit=args.charLimit,
@@ -422,19 +470,10 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		limitPercent=args.limitPercent,
 		overlapSize=args.overlapSize
 	)
-
 	chunks = organizeChunks(chunks, orderType=args.orderType)
 
+	# save chunked text
 	saveChunks(chunkOutputPath, chunks)
-
-	print("\n--- AFTER CHUNK ---")
-	print("Input:", inputPath)
-	print("Chunk count:", len(chunks))
-
-	print("\n--- CHUNK DETAILS ---")
-	for chunkName, chunkTextValue in chunks.items():
-		print(f"\n{chunkName}")
-		print(f"Length: {len(chunkTextValue)} chars")
 
 	return {
 		"inputPath": inputPath,
@@ -445,22 +484,27 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		"chunks": chunks
 	}
 
+# function for summarizing one file
 def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None):
+	# determine what device to use
 	if deviceId == None:
 		deviceId = args.deviceId
 
+	# create path for summary output and final summary output
 	summaryOutputPath = os.path.join(outputDir, f"{fileInfo['outputBaseName']}_summaries.txt")
 	finalSummaryOutputPath = os.path.join(outputDir, f"{fileInfo['outputBaseName']}_final.txt")
 
+	# prepare chunk inputs, getting rid of special sections
 	chunkInput = {}
 	for k, v in fileInfo["chunks"].items():
 		if k not in ["title", "front front"]:
 			chunkInput[k] = v
-
+	# if excluding special sections causes an empty chunk, just use entire chunk
 	if len(chunkInput) == 0:
 		chunkInput = fileInfo["chunks"]
 
 	# --- FIRST SUMMARY ---
+	# summarize chunks
 	summaries = summarizeWithLoadedModel(
 		chunkInput,
 		tokenizer,
@@ -476,15 +520,11 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 		temperature=args.temperature,
 		topP=args.topP
 	)
-
+	# save chunk summaries
 	saveSummaries(summaryOutputPath, summaries)
 
-	print("\n--- AFTER FIRST SUMMARY ---")
-	print("Input:", fileInfo["inputPath"])
-	print("GPU:", deviceId)
-	print("Summary count:", len(summaries))
-
 	# --- REPEAT / REDUCE ---
+	# repeat summarizing function and combine summaries
 	_, finalSummary = repeatSummaries(
 		summaries,
 		tokenizer,
@@ -504,16 +544,13 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 		temperature=args.temperature,
 		topP=args.topP
 	)
-
+	# extract final summary text
 	finalText = finalSummary.get("paper", "")
 
-	print("\n--- FINAL SUMMARY ---")
-	print("Input:", fileInfo["inputPath"])
-	print("GPU:", deviceId)
-	print(finalText)
-
+	# save final summary
 	saveText(finalSummaryOutputPath, finalText)
 
+	# update fileinfo with results
 	fileInfo["summaryOutputPath"] = summaryOutputPath
 	fileInfo["finalSummaryOutputPath"] = finalSummaryOutputPath
 	fileInfo["finalSummaryText"] = finalText
@@ -521,14 +558,12 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 
 	return fileInfo
 
+# parallel summarization
 def summarizeFileBatch(batchItems, workerInfo, outputDir, args):
 	results = []
 
 	for index, fileInfo in batchItems:
-		print("\n--- GPU WORKER ---")
-		print("GPU:", workerInfo["deviceId"])
-		print("Input:", fileInfo["inputPath"])
-
+		# workers summarize each file
 		result = summarizeOneFile(
 			fileInfo,
 			workerInfo["tokenizer"],
@@ -542,14 +577,11 @@ def summarizeFileBatch(batchItems, workerInfo, outputDir, args):
 
 	return results
 
+# create gpu workers for parallelization
 def loadModelWorkers(modelName, deviceIds, args):
 	workers = []
 
 	for deviceId in deviceIds:
-		print("\n--- LOAD MODEL ---")
-		print("Model:", modelName)
-		print("GPU:", deviceId)
-
 		tokenizer, model = loadSummarizer(
 			modelName=modelName,
 			deviceId=deviceId,
@@ -565,11 +597,13 @@ def loadModelWorkers(modelName, deviceIds, args):
 
 	return workers
 
+# summarization controller
 def summarizeFiles(fileInfos, workers, outputDir, args):
+	# if only one gpu worker is available, run in sequential mode
 	if len(workers) == 1 or args.parallelMode == "none" or len(fileInfos) == 1:
 		workerInfo = workers[0]
 		summarizedFileInfos = []
-
+		# each file is summarized sequentially
 		for fileInfo in fileInfos:
 			summarizedFileInfos.append(
 				summarizeOneFile(
@@ -584,6 +618,7 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 
 		return summarizedFileInfos
 
+	# multiple gpu workers are available, parallel mode is enabled
 	assignments = []
 	for workerInfo in workers:
 		assignments.append([])
@@ -594,10 +629,7 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 
 	orderedResults = [None] * len(fileInfos)
 
-	print("\n--- PARALLEL SUMMARIZATION ---")
-	print("Mode: file-level data parallelism")
-	print("GPU devices:", [workerInfo["deviceId"] for workerInfo in workers])
-
+	# create threads
 	with ThreadPoolExecutor(max_workers=len(workers)) as executor:
 		futures = []
 
@@ -622,7 +654,9 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 
 # - - - - - - - - - - #
 
+# if multiple files, multiple final summaries from each file needs to be combined
 def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
+	# get device
 	if deviceId == None:
 		deviceId = args.deviceId
 
@@ -636,6 +670,7 @@ def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
 			"Document: " + fileInfo["displayName"] + "\n\n" + fileInfo["finalSummaryText"]
 		)
 
+	# combine final summaries
 	_, combinedFinal = repeatSummaries(
 		combinedInput,
 		tokenizer,
@@ -658,6 +693,7 @@ def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
 
 	return combinedFinal.get("paper", "")
 
+# generate a paragraph for report
 def generateReportParagraph(sourceText, promptText, tokenizer, model, args, deviceId):
 	sectionInput = {
 		"report": sourceText
@@ -685,13 +721,15 @@ def generateReportParagraph(sourceText, promptText, tokenizer, model, args, devi
 
 	return finalSection.get("paper", "")
 
+# builds introduction and conclusion of report
 def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, model, args, deviceId):
+	# build LLM context prompt for report
 	reportContext = buildReportContext(fileInfos, combinedSummaryText)
 
+	# get introduction paragraph for report
 	if args.introductionText != None:
 		introduction = args.introductionText
 	elif args.generateIntroduction:
-		print("\n--- GENERATING INTRODUCTION ---")
 		introduction = generateReportParagraph(
 			reportContext,
 			getIntroductionPromptText(args),
@@ -703,10 +741,10 @@ def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, mode
 	else:
 		introduction = getDefaultIntroductionText(fileInfos)
 
+	# get conclusion paragraph for report
 	if args.conclusionText != None:
 		conclusion = args.conclusionText
 	elif args.generateConclusion:
-		print("\n--- GENERATING CONCLUSION ---")
 		conclusion = generateReportParagraph(
 			reportContext,
 			getConclusionPromptText(args),
@@ -727,6 +765,7 @@ def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, mode
 	return introduction, conclusion
 
 def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, outputDir, outputBaseName, args):
+	# generate final survey paper filepaths and standalone final summary path
 	finalSummaryOutputPath = os.path.join(outputDir, f"{outputBaseName}_final.txt")
 	surveyTxtPath = os.path.join(outputDir, f"{outputBaseName}_survey.txt")
 	surveyDocxPath = os.path.join(outputDir, f"{outputBaseName}_survey.docx")
@@ -734,6 +773,7 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 
 	saveText(finalSummaryOutputPath, combinedSummaryText)
 
+	# determine survey title
 	if args.title != None:
 		title = args.title
 	elif len(fileInfos) == 1:
@@ -741,14 +781,16 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 	else:
 		title = "Multi File Survey Report"
 
+	# create dictionary for summaries
 	summaryDict = {
 		"paper": combinedSummaryText
 	}
-
+	# save individual summaries for each file and add to dictionary
 	if len(fileInfos) > 1:
 		for fileInfo in fileInfos:
 			summaryDict[fileInfo["displayName"]] = fileInfo["finalSummaryText"]
 
+	# generate final survey paper txt file
 	exportSurveyPaper(
 		surveyTxtPath,
 		"txt",
@@ -759,7 +801,7 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 		conclusion,
 		abstractText=args.abstractText
 	)
-
+	# generate final survey paper docx file
 	exportSurveyPaper(
 		surveyDocxPath,
 		"docx",
@@ -770,7 +812,7 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 		conclusion,
 		abstractText=args.abstractText
 	)
-
+	# generate final survey paper pdf file
 	exportSurveyPaper(
 		surveyPdfPath,
 		"pdf",
@@ -791,24 +833,20 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 
 # - - - - - - - - - - #
 
+# combine all functions to create modular pipeline
 def main():
+	# parse commandline arguments
 	args = parseArgs()
-
 	inputPaths = args.input
 	outputDir = args.output
 	modelName = args.model
 	deviceIds = getDeviceIds(args)
-
-	print("\n--- CONFIG ---")
-	print("Model:", modelName)
-	print("Output directory:", outputDir)
-	print("Input files:", len(inputPaths))
-	print("GPU devices:", deviceIds)
-
+	# create output directory
 	os.makedirs(outputDir, exist_ok=True)
-
+	# create unique file names
 	uniqueNames = makeUniqueNames(inputPaths)
 
+	# determine output name for summary
 	if args.outputName != None:
 		finalOutputBaseName = makeSafeName(args.outputName)
 	elif len(inputPaths) == 1:
@@ -816,6 +854,7 @@ def main():
 	else:
 		finalOutputBaseName = "multi_file_summary"
 
+	# get file information
 	fileInfos = []
 
 	for i, inputPath in enumerate(inputPaths):
@@ -827,18 +866,19 @@ def main():
 		)
 		fileInfos.append(fileInfo)
 
+	# REMOVE WAITSKIP
 	waitForNextStep("model loading", args.skipWaits)
-
+	# create gpu workers
 	workers = loadModelWorkers(modelName, deviceIds, args)
-
+	# REMOVE WAITSKIP
 	waitForNextStep("summarization", args.skipWaits)
-
+	# begin summarization
 	summarizedFileInfos = summarizeFiles(fileInfos, workers, outputDir, args)
-
+	# REMOVE WAITSKIP
 	waitForNextStep("combined survey synthesis", args.skipWaits)
 
 	combinedWorker = workers[0]
-
+	# combine final summaries
 	combinedSummaryText = buildCombinedSummary(
 		summarizedFileInfos,
 		combinedWorker["tokenizer"],
@@ -846,9 +886,9 @@ def main():
 		args,
 		deviceId=combinedWorker["deviceId"]
 	)
-
+	# REMOVE WAITSKIP
 	waitForNextStep("introduction and conclusion", args.skipWaits)
-
+	# generate introduction and conclusion paragraphs
 	introduction, conclusion = buildGeneratedReportSections(
 		summarizedFileInfos,
 		combinedSummaryText,
@@ -857,9 +897,9 @@ def main():
 		args,
 		deviceId=combinedWorker["deviceId"]
 	)
-
+	# REMOVE WAITSKIP
 	waitForNextStep("output", args.skipWaits)
-
+	# export final survey paper files
 	outputPaths = exportFinalOutput(
 		summarizedFileInfos,
 		combinedSummaryText,
@@ -870,15 +910,9 @@ def main():
 		args
 	)
 
-	print("\n--- OUTPUT COMPLETE ---")
-	print("Saved to:", outputDir)
-	print("Final summary:", outputPaths["finalSummaryOutputPath"])
-	print("Survey txt:", outputPaths["surveyTxtPath"])
-	print("Survey docx:", outputPaths["surveyDocxPath"])
-	print("Survey pdf:", outputPaths["surveyPdfPath"])
-
 # - - - - - - - - - - #
 
+# execute pipeline in driver
 if __name__ == "__main__":
 	main()
 
