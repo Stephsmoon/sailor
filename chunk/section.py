@@ -8,29 +8,6 @@ import re
 
 # - - - - - - - - - - #
 
-# count words in content
-def countWords(content):
-	wordCounts = {}
-	currentWord = ""
-	for char in content:
-		if char.isalnum():
-			currentWord += char
-		else:
-			if currentWord != "":
-				lowerWord = currentWord.lower()
-				if lowerWord in wordCounts:
-					wordCounts[lowerWord] += 1
-				else:
-					wordCounts[lowerWord] = 1
-				currentWord = ""
-	if currentWord != "":
-		lowerWord = currentWord.lower()
-		if lowerWord in wordCounts:
-			wordCounts[lowerWord] += 1
-		else:
-			wordCounts[lowerWord] = 1
-	return wordCounts
-
 # split at next detected section inside limit
 def detectSections(
 	content,
