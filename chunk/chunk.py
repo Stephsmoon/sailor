@@ -38,6 +38,7 @@ def detectFirstSectionName(content, sectionType="chapter"):
 				if len(parts) >= 2:
 					return "chapter", parts[1]
 
+			# check for roman numerals
 			match = re.match(r'^([IVXLC]+)\s+([A-Z][A-Z\'\?\!\,\-\s]+)$', strippedLine)
 			if match:
 				return "chapter", match.group(1)
@@ -66,6 +67,7 @@ def chunkText(content, charLimit, sectionType="chapter", limitPercent=0.9, overl
 	currentType = None
 	currentName = None
 
+	# loop until no more text is left
 	while remainingText != "":
 		firstPart, secondPart, saveType, saveName, nextType, nextName = detectSections(
 			remainingText,
@@ -214,6 +216,7 @@ def organizeChunks(chunks, orderType="firstToLast"):
 		elif re.match(r'^[IVXLC]+(\.\d+)?$', numberPart):
 			romanValues = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100}
 
+			# function to easily convert roman numerals to integers
 			def romanToInt(romanText):
 				total = 0
 				prevValue = 0
@@ -251,6 +254,7 @@ def organizeChunks(chunks, orderType="firstToLast"):
 			"sortText": sortText
 		})
 
+	# define sorting rule
 	def sortKey(item):
 		if item["sortText"] == "front":
 			return (-1, 0, 0)
@@ -259,12 +263,15 @@ def organizeChunks(chunks, orderType="firstToLast"):
 		else:
 			return (0, item["mainNumber"], item["subNumber"])
 
+	# sort normally (default)
 	if orderType == "firstToLast":
 		parsedChunks.sort(key=sortKey)
-
+	
+	# sort in reverse
 	elif orderType == "lastToFirst":
 		parsedChunks.sort(key=sortKey, reverse=True)
-
+	
+	# sort in reverse by section, keep subsections in the firstToLast order
 	elif orderType == "lastToFirstBySection":
 		groupedChunks = {}
 
@@ -287,7 +294,8 @@ def organizeChunks(chunks, orderType="firstToLast"):
 				reorderedChunks.append(item)
 
 		parsedChunks = reorderedChunks
-
+	
+	# sort by top-level sections
 	elif orderType == "firstToLastByTop":
 		normalFlow = []
 		delayedChunks = []
