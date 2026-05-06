@@ -8,13 +8,10 @@ bitsandbytes>=0.43.0
 pypdf>=4.0.0
 python-docx>=1.1.0
 
-# PDF Output
+# Output
 reportlab>=4.0.0
+tqdm>=4.66.0
 
 # Optional (recommended for stability / performance)
 sentencepiece>=0.2.0
-
-# API
-fastapi
-uvicorn
-python-multipart
+t

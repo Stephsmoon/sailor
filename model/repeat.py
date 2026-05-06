@@ -12,76 +12,57 @@ from model.summarize import summarizeWithLoadedModel
 # get main section name from a chunk key
 def getSectionName(chunkKey):
 	parts = chunkKey.split()
-
 	if len(parts) < 2:
 		return chunkKey
-
 	labelType = parts[0]
 	numberPart = parts[1]
-
 	if "." in numberPart:
 		mainNumber = numberPart.split(".")[0]
 		return labelType + " " + mainNumber
-
 	return chunkKey
 
 # make a plain copy of a summary dictionary for logging
 def copySummaryDict(summaries):
 	copiedSummaries = {}
-
 	for summaryName, summaryText in summaries.items():
 		copiedSummaries[str(summaryName)] = str(summaryText)
-
 	return copiedSummaries
 
 # add one repeat/reduction entry to the optional log
 def addReductionLog(reductionLog, entry):
 	if reductionLog == None:
 		return
-
 	reductionLog.append(entry)
 
 # combine summaries by section
 def combineSectionSummaries(summaries):
 	groupedSummaries = {}
-
 	for chunkKey, summaryText in summaries.items():
 		sectionName = getSectionName(chunkKey)
-
 		if sectionName not in groupedSummaries:
 			groupedSummaries[sectionName] = []
-
 		groupedSummaries[sectionName].append((chunkKey, summaryText))
-
 	combinedSections = {}
-
 	for sectionName, groupItems in groupedSummaries.items():
 		groupItems.sort(key=lambda item: item[0])
-
 		combinedText = ""
 		for chunkKey, summaryText in groupItems:
 			combinedText += summaryText.strip() + "\n\n"
-
 		combinedSections[sectionName] = combinedText.strip()
-
 	return combinedSections
 
 # check whether any section still has multiple parts
 def hasMultiPartSections(summaries):
 	sectionCounts = {}
-
 	for chunkKey in summaries:
 		sectionName = getSectionName(chunkKey)
-
 		if sectionName in sectionCounts:
 			sectionCounts[sectionName] += 1
 		else:
 			sectionCounts[sectionName] = 1
-
 	for sectionName in sectionCounts:
 		if sectionCounts[sectionName] > 1:
 			return True
-
 	return False
 
 # reduce section parts into one summary per section
@@ -109,22 +90,17 @@ def reduceSections(
 ):
 	combinedSections = combineSectionSummaries(summaries)
 	reducedSummaries = {}
-
 	for sectionName, combinedText in combinedSections.items():
 		sectionPieces = []
-
 		for chunkKey in summaries:
 			if getSectionName(chunkKey) == sectionName:
 				sectionPieces.append(chunkKey)
-
 		if len(sectionPieces) == 1:
 			reducedSummaries[sectionName] = summaries[sectionPieces[0]]
 			continue
-
 		sectionInput = {
 			sectionName: combinedText
 		}
-
 		sectionSummary = summarizeWithLoadedModel(
 			sectionInput,
 			tokenizer,
@@ -144,9 +120,7 @@ def reduceSections(
 			noRepeatNgramSize=noRepeatNgramSize,
 			qualityPolish=qualityPolish
 		)
-
 		reducedSummaries[sectionName] = sectionSummary[sectionName]
-
 		addReductionLog(reductionLog, {
 			"runName": reductionRunName,
 			"stage": "section-reduction",
@@ -158,16 +132,13 @@ def reduceSections(
 			"combinedInput": combinedText,
 			"outputSummaries": copySummaryDict(sectionSummary)
 		})
-
 	return reducedSummaries
 
 # merge all summaries into one text block
 def mergeAllSummaries(summaries):
 	fullText = ""
-
 	for summaryName, summaryText in summaries.items():
 		fullText += summaryText.strip() + "\n\n"
-
 	return fullText.strip()
 
 # reduce the whole paper until one final summary remains
@@ -198,13 +169,11 @@ def reducePaper(
 ):
 	currentText = mergeAllSummaries(summaries)
 	roundCount = 0
-
 	while roundCount < maxRounds:
 		if len(currentText) <= charLimit:
 			finalInput = {
 				"paper": currentText
 			}
-
 			finalSummary = summarizeWithLoadedModel(
 				finalInput,
 				tokenizer,
@@ -224,7 +193,6 @@ def reducePaper(
 				noRepeatNgramSize=noRepeatNgramSize,
 				qualityPolish=qualityPolish
 			)
-
 			addReductionLog(reductionLog, {
 				"runName": reductionRunName,
 				"stage": "paper-final-reduction",
@@ -234,9 +202,7 @@ def reducePaper(
 				"inputSummaries": copySummaryDict(finalInput),
 				"outputSummaries": copySummaryDict(finalSummary)
 			})
-
 			return finalSummary
-
 		rechunked = chunkText(
 			currentText,
 			charLimit=charLimit,
@@ -244,19 +210,14 @@ def reducePaper(
 			limitPercent=limitPercent,
 			overlapSize=overlapSize
 		)
-
 		rechunked = organizeChunks(rechunked, orderType="firstToLast")
-
 		rechunkInput = {}
 		partCount = 1
-
 		for chunkName, chunkTextValue in rechunked.items():
 			if chunkName == "title" or chunkName == "front front":
 				continue
-
 			rechunkInput["paper." + str(partCount)] = chunkTextValue
 			partCount += 1
-
 		reducedSummaries = summarizeWithLoadedModel(
 			rechunkInput,
 			tokenizer,
@@ -276,9 +237,7 @@ def reducePaper(
 			noRepeatNgramSize=noRepeatNgramSize,
 			qualityPolish=qualityPolish
 		)
-
 		newCurrentText = mergeAllSummaries(reducedSummaries)
-
 		addReductionLog(reductionLog, {
 			"runName": reductionRunName,
 			"stage": "paper-rechunk-reduction",
@@ -289,14 +248,11 @@ def reducePaper(
 			"outputSummaries": copySummaryDict(reducedSummaries),
 			"mergedOutputText": newCurrentText
 		})
-
 		currentText = newCurrentText
 		roundCount += 1
-
 	finalInput = {
 		"paper": currentText
 	}
-
 	finalSummary = summarizeWithLoadedModel(
 		finalInput,
 		tokenizer,
@@ -316,7 +272,6 @@ def reducePaper(
 		noRepeatNgramSize=noRepeatNgramSize,
 		qualityPolish=qualityPolish
 	)
-
 	addReductionLog(reductionLog, {
 		"runName": reductionRunName,
 		"stage": "paper-max-round-final-reduction",
@@ -326,7 +281,6 @@ def reducePaper(
 		"inputSummaries": copySummaryDict(finalInput),
 		"outputSummaries": copySummaryDict(finalSummary)
 	})
-
 	return finalSummary
 
 # full reduce pipeline
@@ -357,7 +311,6 @@ def repeatSummaries(
 ):
 	currentSummaries = summaries
 	sectionRound = 1
-
 	while hasMultiPartSections(currentSummaries):
 		currentSummaries = reduceSections(
 			currentSummaries,
@@ -381,9 +334,7 @@ def repeatSummaries(
 			reductionRunName=reductionRunName,
 			reductionRound=sectionRound
 		)
-
 		sectionRound += 1
-
 	finalSummary = reducePaper(
 		currentSummaries,
 		tokenizer,
@@ -409,7 +360,6 @@ def repeatSummaries(
 		reductionLog=reductionLog,
 		reductionRunName=reductionRunName
 	)
-
 	return currentSummaries, finalSummary
 
 # - - - - - - - - - - #

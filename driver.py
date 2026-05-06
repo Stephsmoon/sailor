@@ -3,6 +3,7 @@
 
 import os
 import re
+import logging
 import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,43 +21,57 @@ from report.output import exportSurveyPaper
 INITIAL_CHAR_LIMIT = 8000
 REPEAT_CHAR_LIMIT = 20000
 
+logger = logging.getLogger("capstone")
+
+# - - - - - - - - - - #
+
+def setupLogger(logPath):
+	logger = logging.getLogger("capstone")
+	logger.setLevel(logging.INFO)
+	logger.propagate = False
+
+	# Reset handlers so each run writes to the requested log file.
+	for handler in list(logger.handlers):
+		logger.removeHandler(handler)
+		handler.close()
+
+	fileHandler = logging.FileHandler(logPath, mode="w", encoding="utf-8")
+	fileHandler.setLevel(logging.INFO)
+	formatter = logging.Formatter(
+		"%(asctime)s | %(levelname)s | %(message)s",
+		datefmt="%Y-%m-%d %H:%M:%S"
+	)
+	fileHandler.setFormatter(formatter)
+	logger.addHandler(fileHandler)
+	return logger
+
 # - - - - - - - - - - #
 
 # load simple .env key=value pairs without making python-dotenv required
 def loadEnvFile(envPath=".env"):
 	if envPath == None or envPath.strip() == "":
 		return
-
 	if not os.path.exists(envPath):
 		return
-
 	with open(envPath, "r", encoding="utf-8") as f:
 		for line in f:
 			line = line.strip()
-
 			if line == "" or line.startswith("#"):
 				continue
-
 			if line.startswith("export "):
 				line = line[7:].strip()
-
 			if "=" not in line:
 				continue
-
 			key, value = line.split("=", 1)
 			key = key.strip()
 			value = value.strip()
-
 			if key == "":
 				continue
-
 			if " #" in value:
 				value = value.split(" #", 1)[0].strip()
-
 			if len(value) >= 2:
 				if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
 					value = value[1:-1]
-
 			if key not in os.environ:
 				os.environ[key] = value
 
@@ -65,7 +80,6 @@ def getEnvValue(names, defaultValue=None):
 		value = os.getenv(name)
 		if value != None and value.strip() != "":
 			return value.strip()
-
 	return defaultValue
 
 # - - - - - - - - - - #
@@ -73,56 +87,43 @@ def getEnvValue(names, defaultValue=None):
 def strToBool(value):
 	if isinstance(value, bool):
 		return value
-
 	value = value.lower().strip()
-
 	if value in ["true", "t", "yes", "y", "1"]:
 		return True
 	if value in ["false", "f", "no", "n", "0"]:
 		return False
-
 	raise argparse.ArgumentTypeError("Boolean value expected: true or false")
 
 def parseList(value):
 	if value == None:
 		return None
-
 	value = value.strip()
-
 	if value == "" or value.lower() == "none":
 		return None
-
 	items = []
 	for item in value.split(","):
 		item = item.strip()
 		if item != "":
 			items.append(item)
-
 	if len(items) == 0:
 		return None
-
 	return items
 
 def parseIntList(value):
 	items = parseList(value)
-
 	if items == None:
 		return None
-
 	intItems = []
 	for item in items:
 		intItems.append(int(item))
-
 	return intItems
 
 def makeSafeName(name):
 	name = os.path.splitext(os.path.basename(name))[0]
 	name = re.sub(r'[^A-Za-z0-9_-]+', '_', name)
 	name = name.strip("_")
-
 	if name == "":
 		name = "document"
-
 	return name
 
 def makeDisplayName(path):
@@ -133,90 +134,33 @@ def makeDisplayName(path):
 def makeUniqueNames(inputPaths):
 	nameCounts = {}
 	uniqueNames = []
-
 	for inputPath in inputPaths:
 		baseName = makeSafeName(inputPath)
-
 		if baseName not in nameCounts:
 			nameCounts[baseName] = 0
 			uniqueNames.append(baseName)
 		else:
 			nameCounts[baseName] += 1
 			uniqueNames.append(baseName + "_" + str(nameCounts[baseName]))
-
 	return uniqueNames
 
 # - - - - - - - - - - #
 
 def parseArgs():
 	loadEnvFile(".env")
-	envModelName = getEnvValue(["MODEL_NAME", "MODEL", "HF_MODEL_NAME"], "Qwen/Qwen2.5-7B-Instruct")
-
+	envModelName = getEnvValue(["MODEL_NAME", "MODEL", "HF_MODEL_NAME"], "Qwen/Qwen3-8B")
 	parser = argparse.ArgumentParser(description="LLM Summarization Pipeline")
-
 	# input / output
-	parser.add_argument(
-		"--input",
-		required=True,
-		nargs="+",
-		help="Path to one or more input files (txt/pdf/docx)"
-	)
-
-	parser.add_argument(
-		"--output",
-		default="storage",
-		help="Output directory (default: storage)"
-	)
-
-	parser.add_argument(
-		"--outputName",
-		default=None,
-		help="Base name for final output files"
-	)
-
-	parser.add_argument(
-		"--dataFileName",
-		default="data.txt",
-		help="Name of evaluator data file saved in the output directory (default: data.txt)"
-	)
-
-	parser.add_argument(
-		"--title",
-		default=None,
-		help="Title for final survey output"
-	)
-
-	parser.add_argument(
-		"--authorName",
-		default="Stephan DeLuna",
-		help="Author name for final survey output"
-	)
-
-	parser.add_argument(
-		"--abstractText",
-		default="",
-		help="Optional abstract text for final survey output"
-	)
-
-	parser.add_argument(
-		"--introductionText",
-		default=None,
-		help="Optional introduction text for final survey output"
-	)
-
-	parser.add_argument(
-		"--conclusionText",
-		default=None,
-		help="Optional conclusion text for final survey output"
-	)
-
-	parser.add_argument(
-		"--skipWaits",
-		type=strToBool,
-		default=False,
-		help="Skip interactive pause steps (default: false)"
-	)
-
+	parser.add_argument("--input", required=True, nargs="+", help="Path to one or more input files (txt/pdf/docx)")
+	parser.add_argument("--output", default="storage", help="Output directory (default: storage)")
+	parser.add_argument("--outputName", default=None, help="Base name for final output files")
+	parser.add_argument("--outputTypes", default="txt,docx,pdf", help="Comma-separated output formats: txt,docx,pdf")
+	parser.add_argument("--dataFileName", default="data.txt", help="Name of evaluator data file saved in the output directory (default: data.txt)")
+	parser.add_argument("--title", default=None, help="Title for final survey output" )
+	parser.add_argument("--authorName", default="", help="Author name for final survey output")
+	parser.add_argument("--abstractText", default="", help="Optional abstract text for final survey output")
+	parser.add_argument("--introductionText", default=None, help="Optional introduction text for final survey output")
+	parser.add_argument("--conclusionText", default=None, help="Optional conclusion text for final survey output")
 	# cleanContent arguments
 	parser.add_argument("--removeCitation", type=strToBool, default=True)
 	parser.add_argument("--removeUnicode", type=strToBool, default=True)
@@ -224,36 +168,22 @@ def parseArgs():
 	parser.add_argument("--removeStutters", type=strToBool, default=True)
 	parser.add_argument("--removeFillers", type=strToBool, default=True)
 	parser.add_argument("--excludeRepeatWords", type=strToBool, default=True)
-	parser.add_argument("--removeWordMorphemes", type=strToBool, default=False)
 	parser.add_argument("--stutterList", default=None, help="Comma-separated custom stutter words")
 	parser.add_argument("--fillerList", default=None, help="Comma-separated custom filler words")
-	parser.add_argument("--morphemeList", default=None, help="Comma-separated custom morphemes")
-
 	# chunkText arguments
 	parser.add_argument("--charLimit", type=int, default=INITIAL_CHAR_LIMIT)
 	parser.add_argument("--sectionType", default="chapter", choices=["chapter", "page", "paragraph"])
 	parser.add_argument("--limitPercent", type=float, default=0.9)
 	parser.add_argument("--overlapSize", type=int, default=200)
-
 	# organizeChunks arguments
-	parser.add_argument(
-		"--orderType",
-		default="firstToLast",
-		choices=["firstToLast", "lastToFirst", "lastToFirstBySection", "firstToLastByTop"]
-	)
-
+	parser.add_argument("--orderType", default="firstToLast", choices=["firstToLast", "lastToFirst", "lastToFirstBySection", "firstToLastByTop"])
 	# loadSummarizer arguments
-	parser.add_argument(
-		"--model",
-		default=envModelName,
-		help="Hugging Face model name. Defaults to MODEL_NAME, MODEL, or HF_MODEL_NAME in .env; otherwise Qwen/Qwen2.5-7B-Instruct"
-	)
+	parser.add_argument("--model", default=envModelName, help="Hugging Face model name. Defaults to MODEL_NAME, MODEL, or HF_MODEL_NAME in .env; otherwise Qwen/Qwen3-8B")
 	parser.add_argument("--deviceId", type=int, default=0)
 	parser.add_argument("--parallelDevices", default=None, help="Comma-separated GPU IDs for file-level parallel summarization, example: 0,1")
 	parser.add_argument("--parallelMode", default="file", choices=["none", "file"])
 	parser.add_argument("--use4Bit", type=strToBool, default=True)
 	parser.add_argument("--useYarn", type=strToBool, default=False)
-
 	# summarizeWithLoadedModel / summarizeChunk arguments
 	parser.add_argument("--promptText", default=None)
 	parser.add_argument("--sentenceLimit", type=int, default=10)
@@ -264,7 +194,7 @@ def parseArgs():
 	parser.add_argument("--doSample", type=strToBool, default=False)
 	parser.add_argument("--temperature", type=float, default=0.3)
 	parser.add_argument("--topP", type=float, default=0.9)
-
+	parser.add_argument("--showProgress", type=strToBool, default=True, help="Show tqdm progress bars during summarization")
 	# survey synthesis / generated report section arguments
 	parser.add_argument("--surveyPromptText", default=None)
 	parser.add_argument("--generateIntroduction", type=strToBool, default=True)
@@ -273,7 +203,6 @@ def parseArgs():
 	parser.add_argument("--conclusionPromptText", default=None)
 	parser.add_argument("--reportSectionSentenceLimit", type=int, default=6)
 	parser.add_argument("--reportSectionMaxNewTokens", type=int, default=260)
-
 	# repeatSummaries / reduction arguments
 	parser.add_argument("--repeatCharLimit", type=int, default=REPEAT_CHAR_LIMIT)
 	parser.add_argument("--repeatLimitPercent", type=float, default=0.9)
@@ -281,19 +210,9 @@ def parseArgs():
 	parser.add_argument("--repeatMaxRounds", type=int, default=5)
 	parser.add_argument("--repeatSentenceLimit", type=int, default=6)
 	parser.add_argument("--repeatMaxNewTokens", type=int, default=220)
-
 	return parser.parse_args()
 
 # - - - - - - - - - - #
-
-def waitForNextStep(stepName, skipWaits=False):
-	if skipWaits:
-		return
-
-	while True:
-		userInput = input(f"\nPress space then Enter to continue to {stepName}: ")
-		if userInput == " ":
-			break
 
 def saveText(path, text):
 	with open(path, "w", encoding="utf-8") as f:
@@ -316,16 +235,13 @@ def saveSummaries(path, summaries):
 def countTotalWords(content):
 	wordCounts = countWords(content)
 	totalWords = 0
-
 	for word in wordCounts:
 		totalWords += wordCounts[word]
-
 	return totalWords
 
 def makeThroughputMetric(runName, inputPath, deviceId, elapsedSeconds, inputChars, inputWords, chunkCount, outputChars, outputWords):
 	if elapsedSeconds <= 0:
 		elapsedSeconds = 0.000001
-
 	return {
 		"runName": runName,
 		"inputPath": inputPath,
@@ -343,7 +259,6 @@ def makeThroughputMetric(runName, inputPath, deviceId, elapsedSeconds, inputChar
 
 def writeLoggedTextBlock(f, label, textValue):
 	textValue = str(textValue)
-
 	f.write(label + "\n")
 	f.write("-" * 40 + "\n")
 	f.write("Characters: " + str(len(textValue)) + "\n")
@@ -353,11 +268,9 @@ def writeLoggedTextBlock(f, label, textValue):
 def writeLoggedSummaryDict(f, label, summaryDict):
 	f.write(label + "\n")
 	f.write("-" * 40 + "\n")
-
 	if summaryDict == None or len(summaryDict) == 0:
 		f.write("No entries recorded.\n\n")
 		return
-
 	for summaryName, summaryText in summaryDict.items():
 		summaryText = str(summaryText)
 		f.write("Entry: " + str(summaryName) + "\n")
@@ -370,43 +283,31 @@ def writeOneReductionEntry(f, entry):
 	f.write("Stage: " + str(entry.get("stage", "")) + "\n")
 	f.write("Round: " + str(entry.get("round", "")) + "\n")
 	f.write("GPU: " + str(entry.get("deviceId", "")) + "\n")
-
 	if entry.get("sectionName", None) != None:
 		f.write("Section: " + str(entry.get("sectionName", "")) + "\n")
-
 	if entry.get("inputKeys", None) != None:
 		f.write("Input keys: " + ", ".join([str(x) for x in entry.get("inputKeys", [])]) + "\n")
-
 	f.write("\n")
-
 	if entry.get("inputSummaries", None) != None:
 		writeLoggedSummaryDict(f, "Input Summaries Before Reduction", entry.get("inputSummaries", {}))
-
 	if entry.get("combinedInput", None) != None:
 		writeLoggedTextBlock(f, "Combined Input Text Before Reduction", entry.get("combinedInput", ""))
-
 	if entry.get("inputText", None) != None:
 		writeLoggedTextBlock(f, "Merged Input Text Before Reduction", entry.get("inputText", ""))
-
 	if entry.get("rechunkedInput", None) != None:
 		writeLoggedSummaryDict(f, "Rechunked Input Pieces Before Reduction", entry.get("rechunkedInput", {}))
-
 	if entry.get("outputSummaries", None) != None:
 		writeLoggedSummaryDict(f, "Output Summaries After Reduction", entry.get("outputSummaries", {}))
-
 	if entry.get("mergedOutputText", None) != None:
 		writeLoggedTextBlock(f, "Merged Output Text After Reduction", entry.get("mergedOutputText", ""))
-
 	f.write("=" * 80 + "\n\n")
 
 def writeReductionLogSection(f, sectionTitle, reductionLogs):
 	f.write(sectionTitle + "\n")
 	f.write("=" * 80 + "\n\n")
-
 	if reductionLogs == None or len(reductionLogs) == 0:
 		f.write("No intermediate repeat.py reductions were recorded for this section.\n\n")
 		return
-
 	for entry in reductionLogs:
 		writeOneReductionEntry(f, entry)
 
@@ -414,7 +315,6 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 	with open(path, "w", encoding="utf-8") as f:
 		f.write("Evaluator Data Report\n")
 		f.write("=" * 80 + "\n\n")
-
 		f.write("Run Configuration\n")
 		f.write("-" * 80 + "\n")
 		f.write("Model: " + str(args.model) + "\n")
@@ -425,7 +325,6 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 		f.write("Character limit: " + str(args.charLimit) + "\n")
 		f.write("Section type: " + str(args.sectionType) + "\n")
 		f.write("Order type: " + str(args.orderType) + "\n\n")
-
 		f.write("GPU Throughput Runs\n")
 		f.write("-" * 80 + "\n")
 		if len(gpuRunMetrics) == 0:
@@ -445,7 +344,6 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 				f.write("Word throughput: " + format(metric.get("wordsPerSecond", 0), ".2f") + " words/sec\n")
 				f.write("Chunk throughput: " + format(metric.get("chunksPerSecond", 0), ".4f") + " chunks/sec\n")
 				f.write("\n")
-
 		f.write("Document Cleaning and Chunking Metrics\n")
 		f.write("=" * 80 + "\n\n")
 		for fileInfo in fileInfos:
@@ -456,20 +354,17 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 			f.write("Word count before cleaning: " + str(fileInfo.get("rawWordCount", 0)) + "\n")
 			f.write("Word count after cleaning: " + str(fileInfo.get("cleanedWordCount", 0)) + "\n")
 			f.write("Removed citations: " + str(fileInfo.get("removedCitationCount", 0)) + "\n")
-			f.write("Removed morpheme words: " + str(fileInfo.get("removedMorphemeCount", 0)) + "\n")
 			f.write("Chunk count: " + str(len(fileInfo.get("chunks", {}))) + "\n")
 			f.write("\nChunk Character Counts\n")
 			for chunkName, chunkTextValue in fileInfo.get("chunks", {}).items():
 				f.write("- " + chunkName + ": " + str(len(chunkTextValue)) + " characters\n")
 			f.write("\n")
-
 		f.write("Chunk Text Before and After Summarization\n")
 		f.write("=" * 80 + "\n\n")
 		for fileInfo in fileInfos:
 			f.write("Document: " + fileInfo["displayName"] + "\n")
 			f.write("Input path: " + fileInfo["inputPath"] + "\n")
 			f.write("-" * 80 + "\n\n")
-
 			for item in fileInfo.get("chunkSummaryPairs", []):
 				f.write("Chunk: " + item.get("chunkName", "") + "\n")
 				f.write("Chunk characters: " + str(item.get("chunkChars", 0)) + "\n")
@@ -481,7 +376,6 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 				f.write("-" * 40 + "\n")
 				f.write(item.get("summaryText", "").strip() + "\n")
 				f.write("\n" + "=" * 80 + "\n\n")
-
 		f.write("Repeat.py Intermediate Reduction Logs\n")
 		f.write("=" * 80 + "\n\n")
 		for fileInfo in fileInfos:
@@ -490,13 +384,11 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 				"Document Repeat Reductions - " + fileInfo["displayName"],
 				fileInfo.get("reductionLog", [])
 			)
-
 		writeReductionLogSection(
 			f,
 			"Global Repeat Reductions - Combined Survey / Report Sections",
 			getattr(args, "globalReductionLogs", [])
 		)
-
 		f.write("Final Combined Survey Summary\n")
 		f.write("=" * 80 + "\n")
 		f.write(combinedSummaryText.strip() + "\n\n")
@@ -511,16 +403,13 @@ def writeDataFile(path, fileInfos, gpuRunMetrics, combinedSummaryText, introduct
 
 def getDeviceIds(args):
 	deviceIds = parseIntList(args.parallelDevices)
-
 	if deviceIds == None or len(deviceIds) == 0:
 		deviceIds = [args.deviceId]
-
 	return deviceIds
 
 def getSurveyPromptText(args, isMultiFile):
 	if args.surveyPromptText != None:
 		return args.surveyPromptText
-
 	if isMultiFile:
 		return (
 			"Write the survey synthesis in English only. "
@@ -531,25 +420,21 @@ def getSurveyPromptText(args, isMultiFile):
 			"Use a clear academic tone. "
 			"Keep the synthesis under 8 sentences."
 		)
-
 	return args.promptText
 
 def getDefaultIntroductionText(fileInfos):
 	if len(fileInfos) == 1:
 		return "This report summarizes the provided document using a multi-stage LLM pipeline."
-
 	return "This report summarizes multiple provided documents using a multi-stage LLM pipeline and synthesizes their shared themes into a survey-style overview."
 
 def getDefaultConclusionText(fileInfos):
 	if len(fileInfos) == 1:
 		return "This summary condenses the full document into a concise overview."
-
 	return "This summary condenses the full document set into a concise overview while preserving individual source summaries for review."
 
 def getIntroductionPromptText(args):
 	if args.introductionPromptText != None:
 		return args.introductionPromptText
-
 	return (
 		"Write an introduction paragraph for a survey-style report in English only. "
 		"Base it only on the provided survey synthesis and individual document summaries. "
@@ -562,7 +447,6 @@ def getIntroductionPromptText(args):
 def getConclusionPromptText(args):
 	if args.conclusionPromptText != None:
 		return args.conclusionPromptText
-
 	return (
 		"Write a conclusion paragraph for a survey-style report in English only. "
 		"Base it only on the provided survey synthesis and individual document summaries. "
@@ -588,13 +472,11 @@ def buildReportContext(fileInfos, combinedSummaryText):
 def processInputFile(inputPath, outputDir, outputBaseName, args):
 	cleanedOutputPath = os.path.join(outputDir, f"{outputBaseName}_cleaned.txt")
 	chunkOutputPath = os.path.join(outputDir, f"{outputBaseName}_chunks.txt")
-
 	# --- INGEST ---
 	rawText = loadDocument(inputPath)
 	rawWordCount = countTotalWords(rawText)
 	rawCharCount = len(rawText)
-
-	tokens, removedCitations, removedMorphemes = cleanContent(
+	tokens, removedCitations = cleanContent(
 		rawText,
 		removeCitation=args.removeCitation,
 		removeUnicode=args.removeUnicode,
@@ -602,27 +484,21 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		removeStutters=args.removeStutters,
 		removeFillers=args.removeFillers,
 		excludeRepeatWords=args.excludeRepeatWords,
-		removeWordMorphemes=args.removeWordMorphemes,
 		stutterList=parseList(args.stutterList),
-		fillerList=parseList(args.fillerList),
-		morphemeList=parseList(args.morphemeList)
+		fillerList=parseList(args.fillerList)
 	)
 	cleanedText = joinTokens(tokens)
 	cleanedWordCount = countTotalWords(cleanedText)
 	cleanedCharCount = len(cleanedText)
-
 	saveText(cleanedOutputPath, cleanedText)
-
-	print("\n--- AFTER INGEST ---")
-	print("Input:", inputPath)
-	print("Length:", len(cleanedText))
-	print("Word count before cleaning:", rawWordCount)
-	print("Word count after cleaning:", cleanedWordCount)
-	print("Removed citations:", len(removedCitations))
-	print("Removed morpheme words:", len(removedMorphemes))
-	print("First 500 Char Cleaned")
-	print(cleanedText[:500])
-
+	print("INGEST FINISHED", inputPath)
+	logger.info("--- AFTER INGEST ---")
+	logger.info("Input: %s", inputPath)
+	logger.info("Length: %s", len(cleanedText))
+	logger.info("Word count before cleaning: %s", rawWordCount)
+	logger.info("Word count after cleaning: %s", cleanedWordCount)
+	logger.info("Removed citations: %s", len(removedCitations))
+	logger.info("First 500 Char Cleaned:\n%s", cleanedText[:500])
 	# --- CHUNK ---
 	chunks = chunkText(
 		cleanedText,
@@ -631,20 +507,16 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		limitPercent=args.limitPercent,
 		overlapSize=args.overlapSize
 	)
-
 	chunks = organizeChunks(chunks, orderType=args.orderType)
-
 	saveChunks(chunkOutputPath, chunks)
-
-	print("\n--- AFTER CHUNK ---")
-	print("Input:", inputPath)
-	print("Chunk count:", len(chunks))
-
-	print("\n--- CHUNK DETAILS ---")
+	print("CHUNK FINISHED", inputPath)
+	logger.info("\n--- AFTER CHUNK ---")
+	logger.info("Input: %s", inputPath)
+	logger.info("Chunk count: %s", len(chunks))
+	logger.info("\n--- CHUNK DETAILS ---")
 	for chunkName, chunkTextValue in chunks.items():
-		print(f"\n{chunkName}")
-		print(f"Length: {len(chunkTextValue)} chars")
-
+		logger.info(f"\n{chunkName}")
+		logger.info(f"Length: {len(chunkTextValue)} chars")
 	return {
 		"inputPath": inputPath,
 		"outputBaseName": outputBaseName,
@@ -656,33 +528,26 @@ def processInputFile(inputPath, outputDir, outputBaseName, args):
 		"rawWordCount": rawWordCount,
 		"cleanedWordCount": cleanedWordCount,
 		"removedCitationCount": len(removedCitations),
-		"removedMorphemeCount": len(removedMorphemes),
 		"chunks": chunks
 	}
 
 def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None):
 	if deviceId == None:
 		deviceId = args.deviceId
-
 	summaryOutputPath = os.path.join(outputDir, f"{fileInfo['outputBaseName']}_summaries.txt")
 	finalSummaryOutputPath = os.path.join(outputDir, f"{fileInfo['outputBaseName']}_final.txt")
-
 	chunkInput = {}
 	for k, v in fileInfo["chunks"].items():
 		if k not in ["title", "front front"]:
 			chunkInput[k] = v
-
 	if len(chunkInput) == 0:
 		chunkInput = fileInfo["chunks"]
-
 	runStartTime = time.time()
 	inputChars = 0
 	inputWords = 0
-
 	for chunkName in chunkInput:
 		inputChars += len(chunkInput[chunkName])
 		inputWords += countTotalWords(chunkInput[chunkName])
-
 	# --- FIRST SUMMARY ---
 	summaries = summarizeWithLoadedModel(
 		chunkInput,
@@ -697,9 +562,11 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 		forceEnglishRepair=args.forceEnglishRepair,
 		doSample=args.doSample,
 		temperature=args.temperature,
-		topP=args.topP
+		topP=args.topP,
+		showProgress=args.showProgress,
+		progressLabel=fileInfo["displayName"],
+		progressPosition=deviceId
 	)
-
 	chunkSummaryPairs = []
 	for chunkName, chunkTextValue in chunkInput.items():
 		summaryText = summaries.get(chunkName, "")
@@ -710,14 +577,11 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 			"chunkChars": len(chunkTextValue),
 			"summaryChars": len(summaryText)
 		})
-
 	saveSummaries(summaryOutputPath, summaries)
-
-	print("\n--- AFTER FIRST SUMMARY ---")
-	print("Input:", fileInfo["inputPath"])
-	print("GPU:", deviceId)
-	print("Summary count:", len(summaries))
-
+	logger.info("\n--- AFTER FIRST SUMMARY ---")
+	logger.info("Input: %s", fileInfo["inputPath"])
+	logger.info("GPU: %s", deviceId)
+	logger.info("Summary count: %s", len(summaries))
 	# --- REPEAT / REDUCE ---
 	reductionLog = []
 	_, finalSummary = repeatSummaries(
@@ -741,20 +605,16 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 		reductionLog=reductionLog,
 		reductionRunName="document-repeat-" + fileInfo["displayName"]
 	)
-
 	finalText = finalSummary.get("paper", "")
 	runEndTime = time.time()
 	elapsedSeconds = runEndTime - runStartTime
 	outputChars = 0
 	outputWords = 0
-
 	for summaryName in summaries:
 		outputChars += len(summaries[summaryName])
 		outputWords += countTotalWords(summaries[summaryName])
-
 	outputChars += len(finalText)
 	outputWords += countTotalWords(finalText)
-
 	gpuRunMetric = makeThroughputMetric(
 		"document-summary",
 		fileInfo["inputPath"],
@@ -766,14 +626,11 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 		outputChars,
 		outputWords
 	)
-
-	print("\n--- FINAL SUMMARY ---")
-	print("Input:", fileInfo["inputPath"])
-	print("GPU:", deviceId)
-	print(finalText)
-
+	logger.info("\n--- FINAL SUMMARY ---")
+	logger.info("Input: %s", fileInfo["inputPath"])
+	logger.info("GPU: %s", deviceId)
+	logger.info(finalText)
 	saveText(finalSummaryOutputPath, finalText)
-
 	fileInfo["summaryOutputPath"] = summaryOutputPath
 	fileInfo["finalSummaryOutputPath"] = finalSummaryOutputPath
 	fileInfo["finalSummaryText"] = finalText
@@ -781,17 +638,16 @@ def summarizeOneFile(fileInfo, tokenizer, model, outputDir, args, deviceId=None)
 	fileInfo["chunkSummaryPairs"] = chunkSummaryPairs
 	fileInfo["reductionLog"] = reductionLog
 	fileInfo["gpuRunMetric"] = gpuRunMetric
-
 	return fileInfo
 
 def summarizeFileBatch(batchItems, workerInfo, outputDir, args):
 	results = []
-
 	for index, fileInfo in batchItems:
-		print("\n--- GPU WORKER ---")
 		print("GPU:", workerInfo["deviceId"])
 		print("Input:", fileInfo["inputPath"])
-
+		logger.info("\n--- GPU WORKER ---")
+		logger.info("GPU: %s", workerInfo["deviceId"])
+		logger.info("Input: %s", fileInfo["inputPath"])
 		result = summarizeOneFile(
 			fileInfo,
 			workerInfo["tokenizer"],
@@ -800,39 +656,34 @@ def summarizeFileBatch(batchItems, workerInfo, outputDir, args):
 			args,
 			deviceId=workerInfo["deviceId"]
 		)
-
 		results.append((index, result))
-
 	return results
 
 def loadModelWorkers(modelName, deviceIds, args):
 	workers = []
-
 	for deviceId in deviceIds:
-		print("\n--- LOAD MODEL ---")
 		print("Model:", modelName)
-		print("GPU:", deviceId)
-
+		print("GPU:", deviceId)	
+		logger.info("\n--- LOAD MODEL ---")
+		logger.info("Model: %s", modelName)
+		logger.info("GPU: %s", deviceId)
 		tokenizer, model = loadSummarizer(
 			modelName=modelName,
 			deviceId=deviceId,
 			use4Bit=args.use4Bit,
 			useYarn=args.useYarn
 		)
-
 		workers.append({
 			"deviceId": deviceId,
 			"tokenizer": tokenizer,
 			"model": model
 		})
-
 	return workers
 
 def summarizeFiles(fileInfos, workers, outputDir, args):
 	if len(workers) == 1 or args.parallelMode == "none" or len(fileInfos) == 1:
 		workerInfo = workers[0]
 		summarizedFileInfos = []
-
 		for fileInfo in fileInfos:
 			summarizedFileInfos.append(
 				summarizeOneFile(
@@ -844,26 +695,21 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 					deviceId=workerInfo["deviceId"]
 				)
 			)
-
 		return summarizedFileInfos
-
 	assignments = []
 	for workerInfo in workers:
 		assignments.append([])
-
 	for i, fileInfo in enumerate(fileInfos):
 		workerIndex = i % len(workers)
 		assignments[workerIndex].append((i, fileInfo))
-
 	orderedResults = [None] * len(fileInfos)
-
-	print("\n--- PARALLEL SUMMARIZATION ---")
 	print("Mode: file-level data parallelism")
 	print("GPU devices:", [workerInfo["deviceId"] for workerInfo in workers])
-
+	logger.info("\n--- PARALLEL SUMMARIZATION ---")
+	logger.info("Mode: file-level data parallelism")
+	logger.info("GPU devices: %s", [workerInfo["deviceId"] for workerInfo in workers])
 	with ThreadPoolExecutor(max_workers=len(workers)) as executor:
 		futures = []
-
 		for workerIndex, workerInfo in enumerate(workers):
 			if len(assignments[workerIndex]) > 0:
 				future = executor.submit(
@@ -874,13 +720,10 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 					args
 				)
 				futures.append(future)
-
 		for future in as_completed(futures):
 			batchResults = future.result()
-
 			for index, result in batchResults:
 				orderedResults[index] = result
-
 	return orderedResults
 
 # - - - - - - - - - - #
@@ -888,21 +731,16 @@ def summarizeFiles(fileInfos, workers, outputDir, args):
 def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
 	if deviceId == None:
 		deviceId = args.deviceId
-
 	if len(fileInfos) == 1:
 		return fileInfos[0]["finalSummaryText"]
-
 	combinedInput = {}
-
 	for i, fileInfo in enumerate(fileInfos):
 		combinedInput["document" + str(i + 1)] = (
 			"Document: " + fileInfo["displayName"] + "\n\n" + fileInfo["finalSummaryText"]
 		)
-
 	runStartTime = time.time()
 	inputTextForMetric = "\n\n".join(combinedInput.values())
 	combinedReductionLog = []
-
 	_, combinedFinal = repeatSummaries(
 		combinedInput,
 		tokenizer,
@@ -924,11 +762,9 @@ def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
 		reductionLog=combinedReductionLog,
 		reductionRunName="combined-survey-synthesis"
 	)
-
 	if not hasattr(args, "globalReductionLogs"):
 		args.globalReductionLogs = []
 	args.globalReductionLogs.extend(combinedReductionLog)
-
 	combinedSummaryText = combinedFinal.get("paper", "")
 	elapsedSeconds = time.time() - runStartTime
 	args.gpuRunMetrics.append(makeThroughputMetric(
@@ -942,17 +778,14 @@ def buildCombinedSummary(fileInfos, tokenizer, model, args, deviceId=None):
 		len(combinedSummaryText),
 		countTotalWords(combinedSummaryText)
 	))
-
 	return combinedSummaryText
 
 def generateReportParagraph(sourceText, promptText, tokenizer, model, args, deviceId, runName="report-section"):
 	sectionInput = {
 		"report": sourceText
 	}
-
 	runStartTime = time.time()
 	reportReductionLog = []
-
 	_, finalSection = repeatSummaries(
 		sectionInput,
 		tokenizer,
@@ -974,11 +807,9 @@ def generateReportParagraph(sourceText, promptText, tokenizer, model, args, devi
 		reductionLog=reportReductionLog,
 		reductionRunName=runName
 	)
-
 	if not hasattr(args, "globalReductionLogs"):
 		args.globalReductionLogs = []
 	args.globalReductionLogs.extend(reportReductionLog)
-
 	sectionText = finalSection.get("paper", "")
 	elapsedSeconds = time.time() - runStartTime
 	args.gpuRunMetrics.append(makeThroughputMetric(
@@ -992,16 +823,14 @@ def generateReportParagraph(sourceText, promptText, tokenizer, model, args, devi
 		len(sectionText),
 		countTotalWords(sectionText)
 	))
-
 	return sectionText
 
 def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, model, args, deviceId):
 	reportContext = buildReportContext(fileInfos, combinedSummaryText)
-
 	if args.introductionText != None:
 		introduction = args.introductionText
 	elif args.generateIntroduction:
-		print("\n--- GENERATING INTRODUCTION ---")
+		logger.info("\n--- GENERATING INTRODUCTION ---")
 		introduction = generateReportParagraph(
 			reportContext,
 			getIntroductionPromptText(args),
@@ -1013,11 +842,10 @@ def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, mode
 		)
 	else:
 		introduction = getDefaultIntroductionText(fileInfos)
-
 	if args.conclusionText != None:
 		conclusion = args.conclusionText
 	elif args.generateConclusion:
-		print("\n--- GENERATING CONCLUSION ---")
+		logger.info("\n--- GENERATING CONCLUSION ---")
 		conclusion = generateReportParagraph(
 			reportContext,
 			getConclusionPromptText(args),
@@ -1029,13 +857,10 @@ def buildGeneratedReportSections(fileInfos, combinedSummaryText, tokenizer, mode
 		)
 	else:
 		conclusion = getDefaultConclusionText(fileInfos)
-
 	if introduction.strip() == "":
 		introduction = getDefaultIntroductionText(fileInfos)
-
 	if conclusion.strip() == "":
 		conclusion = getDefaultConclusionText(fileInfos)
-
 	return introduction, conclusion
 
 def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, outputDir, outputBaseName, args):
@@ -1043,95 +868,100 @@ def exportFinalOutput(fileInfos, combinedSummaryText, introduction, conclusion, 
 	surveyTxtPath = os.path.join(outputDir, f"{outputBaseName}_survey.txt")
 	surveyDocxPath = os.path.join(outputDir, f"{outputBaseName}_survey.docx")
 	surveyPdfPath = os.path.join(outputDir, f"{outputBaseName}_survey.pdf")
-
 	saveText(finalSummaryOutputPath, combinedSummaryText)
-
 	if args.title != None:
 		title = args.title
 	elif len(fileInfos) == 1:
 		title = fileInfos[0]["displayName"]
 	else:
 		title = "Multi File Survey Report"
-
 	summaryDict = {
 		"paper": combinedSummaryText
 	}
-
 	if len(fileInfos) > 1:
 		for fileInfo in fileInfos:
 			summaryDict[fileInfo["displayName"]] = fileInfo["finalSummaryText"]
-
-	exportSurveyPaper(
-		surveyTxtPath,
-		"txt",
-		title,
-		args.authorName,
-		introduction,
-		summaryDict,
-		conclusion,
-		abstractText=args.abstractText
-	)
-
-	exportSurveyPaper(
-		surveyDocxPath,
-		"docx",
-		title,
-		args.authorName,
-		introduction,
-		summaryDict,
-		conclusion,
-		abstractText=args.abstractText
-	)
-
-	exportSurveyPaper(
-		surveyPdfPath,
-		"pdf",
-		title,
-		args.authorName,
-		introduction,
-		summaryDict,
-		conclusion,
-		abstractText=args.abstractText
-	)
-
-	return {
+	outputTypes = parseList(args.outputTypes)
+	if outputTypes == None:
+		outputTypes = ["txt", "docx", "pdf"]
+	else:
+		outputTypes = [item.lower() for item in outputTypes]
+	outputPaths = {
 		"finalSummaryOutputPath": finalSummaryOutputPath,
-		"surveyTxtPath": surveyTxtPath,
-		"surveyDocxPath": surveyDocxPath,
-		"surveyPdfPath": surveyPdfPath
+		"surveyTxtPath": None,
+		"surveyDocxPath": None,
+		"surveyPdfPath": None
 	}
+	if "txt" in outputTypes:
+		exportSurveyPaper(
+			surveyTxtPath,
+			"txt",
+			title,
+			args.authorName,
+			introduction,
+			summaryDict,
+			conclusion,
+			abstractText=args.abstractText
+		)
+		outputPaths["surveyTxtPath"] = surveyTxtPath
+	if "docx" in outputTypes:
+		exportSurveyPaper(
+			surveyDocxPath,
+			"docx",
+			title,
+			args.authorName,
+			introduction,
+			summaryDict,
+			conclusion,
+			abstractText=args.abstractText
+		)
+		outputPaths["surveyDocxPath"] = surveyDocxPath
+	if "pdf" in outputTypes:
+		exportSurveyPaper(
+			surveyPdfPath,
+			"pdf",
+			title,
+			args.authorName,
+			introduction,
+			summaryDict,
+			conclusion,
+			abstractText=args.abstractText
+		)
+		outputPaths["surveyPdfPath"] = surveyPdfPath
+	return outputPaths
 
 # - - - - - - - - - - #
 
 def main():
+	global logger
 	args = parseArgs()
-
 	inputPaths = args.input
 	outputDir = args.output
 	modelName = args.model
 	deviceIds = getDeviceIds(args)
 	args.gpuRunMetrics = []
 	args.globalReductionLogs = []
-
-	print("\n--- CONFIG ---")
+	# make output folder before creating log.txt inside it
+	os.makedirs(outputDir, exist_ok=True)
+	logPath = os.path.join(outputDir, "log.txt")
+	logger = setupLogger(logPath)
 	print("Model:", modelName)
 	print("Output directory:", outputDir)
 	print("Input files:", len(inputPaths))
 	print("GPU devices:", deviceIds)
-
-	os.makedirs(outputDir, exist_ok=True)
-
+	logger.info("\n--- CONFIG ---")
+	logger.info("Model: %s", modelName)
+	logger.info("Output directory: %s", outputDir)
+	logger.info("Input files: %s", len(inputPaths))
+	logger.info("GPU devices: %s", deviceIds)
 	uniqueNames = makeUniqueNames(inputPaths)
-
 	if args.outputName != None:
 		finalOutputBaseName = makeSafeName(args.outputName)
 	elif len(inputPaths) == 1:
 		finalOutputBaseName = uniqueNames[0]
 	else:
 		finalOutputBaseName = "multi_file_summary"
-
 	fileInfos = []
-
 	for i, inputPath in enumerate(inputPaths):
 		fileInfo = processInputFile(
 			inputPath,
@@ -1140,23 +970,17 @@ def main():
 			args
 		)
 		fileInfos.append(fileInfo)
-
-	waitForNextStep("model loading", args.skipWaits)
-
 	workers = loadModelWorkers(modelName, deviceIds, args)
-
-	waitForNextStep("summarization", args.skipWaits)
-
-	summarizedFileInfos = summarizeFiles(fileInfos, workers, outputDir, args)
-
+	summarizedFileInfos = summarizeFiles(
+		fileInfos,
+		workers,
+		outputDir,
+		args
+	)
 	for fileInfo in summarizedFileInfos:
 		if "gpuRunMetric" in fileInfo:
 			args.gpuRunMetrics.append(fileInfo["gpuRunMetric"])
-
-	waitForNextStep("combined survey synthesis", args.skipWaits)
-
 	combinedWorker = workers[0]
-
 	combinedSummaryText = buildCombinedSummary(
 		summarizedFileInfos,
 		combinedWorker["tokenizer"],
@@ -1164,9 +988,6 @@ def main():
 		args,
 		deviceId=combinedWorker["deviceId"]
 	)
-
-	waitForNextStep("introduction and conclusion", args.skipWaits)
-
 	introduction, conclusion = buildGeneratedReportSections(
 		summarizedFileInfos,
 		combinedSummaryText,
@@ -1175,9 +996,6 @@ def main():
 		args,
 		deviceId=combinedWorker["deviceId"]
 	)
-
-	waitForNextStep("output", args.skipWaits)
-
 	outputPaths = exportFinalOutput(
 		summarizedFileInfos,
 		combinedSummaryText,
@@ -1187,7 +1005,6 @@ def main():
 		finalOutputBaseName,
 		args
 	)
-
 	dataOutputPath = os.path.join(outputDir, args.dataFileName)
 	writeDataFile(
 		dataOutputPath,
@@ -1199,14 +1016,28 @@ def main():
 		args
 	)
 	outputPaths["dataOutputPath"] = dataOutputPath
-
 	print("\n--- OUTPUT COMPLETE ---")
 	print("Saved to:", outputDir)
 	print("Final summary:", outputPaths["finalSummaryOutputPath"])
-	print("Survey txt:", outputPaths["surveyTxtPath"])
-	print("Survey docx:", outputPaths["surveyDocxPath"])
-	print("Survey pdf:", outputPaths["surveyPdfPath"])
+	if outputPaths.get("surveyTxtPath") != None:
+		print("Survey txt:", outputPaths["surveyTxtPath"])
+	if outputPaths.get("surveyDocxPath") != None:
+		print("Survey docx:", outputPaths["surveyDocxPath"])
+	if outputPaths.get("surveyPdfPath") != None:
+		print("Survey pdf:", outputPaths["surveyPdfPath"])
 	print("Evaluator data:", outputPaths["dataOutputPath"])
+	print("Log file:", logPath)
+	logger.info("\n--- OUTPUT COMPLETE ---")
+	logger.info("Saved to: %s", outputDir)
+	logger.info("Final summary: %s", outputPaths["finalSummaryOutputPath"])
+	if outputPaths.get("surveyTxtPath") != None:
+		logger.info("Survey txt: %s", outputPaths["surveyTxtPath"])
+	if outputPaths.get("surveyDocxPath") != None:
+		logger.info("Survey docx: %s", outputPaths["surveyDocxPath"])
+	if outputPaths.get("surveyPdfPath") != None:
+		logger.info("Survey pdf: %s", outputPaths["surveyPdfPath"])
+	logger.info("Evaluator data: %s", outputPaths["dataOutputPath"])
+	logger.info("Log file: %s", logPath)
 
 # - - - - - - - - - - #
 

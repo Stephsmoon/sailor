@@ -55,5 +55,3 @@ def loadDocument(path):
 		raise ValueError(f"Unsupported file type: {ext}")
 
 # - - - - - - - - - - #
-
-

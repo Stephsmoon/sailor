@@ -1,25 +1,33 @@
-# LLM Multi-Document Survey Summarization Pipeline
+# Sailor: Hierarchical LLM Document Stack Summarizer
 
-This project summarizes one or more `.txt`, `.pdf`, or `.docx` files using a staged LLM pipeline:
+**Repository:** https://github.com/Stephsmoon/sailor/tree/main
+
+**Team Members:**
+
+- Stephan DeLuna
+- Jocelyn Rogers
+- Cole May
+- Jacob Ray
+- Mason Fox
+
+Sailor is a capstone project for summarizing long documents and stacks of related documents using a hierarchical Large Language Model pipeline. The system accepts `.txt`, `.pdf`, and `.docx` inputs, extracts and cleans text, splits documents into manageable chunks, summarizes each chunk, recursively reduces those summaries, and exports a final survey-style report. The main goal is to demonstrate a practical two-stage approach: first summarize each document individually, then aggregate the document-level summaries into a cohesive overview.
 
 ```text
 Document(s)
-  -> ingest/extract text
+  -> extract text
   -> clean text
   -> chunk text
-  -> summarize chunks
+  -> summarize chunks with an LLM
   -> recursively reduce summaries
-  -> create final survey-style report
-  -> export TXT, DOCX, and PDF outputs
+  -> synthesize document stack
+  -> export report files and evaluator logs
 ```
-
-The pipeline supports both single-document summarization and multi-document survey synthesis. For multi-document runs, each document is summarized individually first, then the individual summaries are combined into one higher-level survey synthesis. The final report can also include a generated introduction and conclusion.
 
 ---
 
 ## Supported Input Types
 
-The document loader supports:
+The loader supports:
 
 ```text
 .txt
@@ -31,15 +39,15 @@ Unsupported file types will raise an error.
 
 ---
 
-## Recommended Project Layout
+## Project Layout
 
-A typical project layout should look like this:
+A typical project layout is:
 
 ```text
 sailor-code/
 ├── driver.py
-├── .env
 ├── README.md
+├── .env.example
 ├── ingest/
 │   ├── extract.py
 │   └── clean.py
@@ -52,12 +60,19 @@ sailor-code/
 ├── report/
 │   └── output.py
 └── storage/
-    ├── jfk.txt
     ├── alice.txt
-    └── rag.pdf
+    ├── jfk.txt
+    ├── rag.pdf
+    └── testables/
 ```
 
-Run commands from the project root, not from inside `storage/`.
+Run commands from the project root:
+
+```bash
+cd /mnt/mars/Capstone/sailor-code
+```
+
+The `storage/` folder is used for local test inputs and generated outputs. It should usually be ignored by Git because it can contain large files, generated reports, logs, and model trial results.
 
 ---
 
@@ -70,41 +85,43 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install the main dependencies:
+Install dependencies:
 
 ```bash
-pip install torch transformers accelerate bitsandbytes pypdf python-docx reportlab
+pip install torch transformers accelerate bitsandbytes pypdf python-docx reportlab tqdm fastapi uvicorn python-multipart
 ```
 
-If your PyTorch/CUDA setup needs a specific wheel, install PyTorch using the command from the official PyTorch selector for your CUDA version first, then install the remaining packages.
+If installing on an NVIDIA GPU server, install the PyTorch CUDA build recommended for your CUDA version first, then install the remaining packages.
+
+Recommended `requirements.txt`:
+
+```txt
+torch>=2.6.0
+transformers>=4.51.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+pypdf>=4.0.0
+python-docx>=1.1.0
+reportlab>=4.0.0
+tqdm>=4.66.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+sentencepiece>=0.2.0
+safetensors>=0.4.0
+```
 
 ---
 
-## Hugging Face Setup
+## Hugging Face and `.env` Setup
 
-Some models require Hugging Face access approval or login.
-
-Login if needed:
+Some Hugging Face models may require login or access approval.
 
 ```bash
 huggingface-cli login
 ```
 
-Optional but recommended: set a Hugging Face cache directory in `.env`:
-
-```env
-HF_HOME=/mnt/caelus/huggingface
-```
-
-This keeps downloaded models out of the project folder.
-
----
-
-## `.env` Model Configuration
-
-The driver automatically reads a `.env` file from the project root.
-
-Use one of these variable names:
+The driver reads model settings from a `.env` file in the project root. The supported model variable names are:
 
 ```env
 MODEL_NAME=Qwen/Qwen3-8B
@@ -122,76 +139,37 @@ or:
 HF_MODEL_NAME=Qwen/Qwen3-8B
 ```
 
-The priority is:
+Optional cache path:
+
+```env
+HF_HOME=/mnt/caelus/huggingface
+```
+
+Model selection priority:
 
 ```text
 1. --model command-line argument
 2. MODEL_NAME from .env
 3. MODEL from .env
 4. HF_MODEL_NAME from .env
-5. Qwen/Qwen2.5-7B-Instruct fallback
-```
-
-Example `.env`:
-
-```env
-MODEL_NAME=Qwen/Qwen3-8B
-HF_HOME=/mnt/caelus/huggingface
+5. Qwen/Qwen3-8B fallback
 ```
 
 The `.env` loader is built into `driver.py`, so `python-dotenv` is not required.
 
 ---
 
-## Model Choice Notes
+## Model Choice
 
-Recommended starting models:
+The final prototype used:
 
 ```text
 Qwen/Qwen3-8B
-Qwen/Qwen2.5-14B-Instruct
-Qwen/Qwen2.5-7B-Instruct
 ```
 
-Possible but heavier:
+Qwen3-8B was selected because it provided a practical balance between summary quality, throughput, and VRAM usage on the available RTX 3090 hardware. The pipeline disables Qwen-style thinking behavior through the summarization template when supported, because this project already performs decomposition and recursive aggregation at the pipeline level. English-only prompting, retry behavior, and repair logic are used to reduce non-English or malformed output.
 
-```text
-mistralai/Mixtral-8x7B-Instruct-v0.1
-```
-
-Important: the current dual-GPU mode uses file-level data parallelism. That means each GPU loads its own full copy of the model. This is excellent for smaller and mid-sized models, but heavy models like Mixtral may run out of VRAM if each 3090 has to hold a full model copy.
-
-For a model that barely fits on one GPU, use:
-
-```bash
---parallelMode none --deviceId 0
-```
-
-For models that fit comfortably on each GPU, use:
-
-```bash
---parallelDevices 0,1 --parallelMode file
-```
-
-No supported model here is strictly English-only. English output is enforced by prompting, retry logic, CJK detection, and an English repair pass.
-
-Qwen3 has a thinking mode. For this pipeline, thinking is disabled by default because chunking and recursive reduction already do the reasoning structure. Keep this setting unless you specifically want slower reasoning-style outputs:
-
-```bash
---enableThinking false
-```
-
-If output quality looks rough, use the optional polish pass. This is slower because it adds an extra editing generation call, but it improves final readability:
-
-```bash
---qualityPolish true
-```
-
-The default generation settings also avoid aggressive no-repeat filtering because that can make summaries sound broken or oddly spaced:
-
-```bash
---repetitionPenalty 1.05 --noRepeatNgramSize 0
-```
+The code can still run other Hugging Face causal language models if they are compatible with the same Transformers interface and available GPU memory.
 
 ---
 
@@ -202,173 +180,100 @@ Example using one PDF:
 ```bash
 python driver.py \
   --input storage/rag.pdf \
-  --output storage \
+  --output storage/results_rag \
   --outputName rag_test \
-  --skipWaits true
+  --removeCitation true \
+  --outputTypes txt,docx,pdf
 ```
 
-This produces files like:
+This creates files such as:
 
 ```text
-storage/rag_cleaned.txt
-storage/rag_chunks.txt
-storage/rag_summaries.txt
-storage/rag_final.txt
-storage/rag_test_final.txt
-storage/rag_test_survey.txt
-storage/rag_test_survey.docx
-storage/rag_test_survey.pdf
+storage/results_rag/rag_cleaned.txt
+storage/results_rag/rag_chunks.txt
+storage/results_rag/rag_summaries.txt
+storage/results_rag/rag_final.txt
+storage/results_rag/rag_test_final.txt
+storage/results_rag/rag_test_survey.txt
+storage/results_rag/rag_test_survey.docx
+storage/results_rag/rag_test_survey.pdf
+storage/results_rag/data.txt
+storage/results_rag/log.txt
 ```
 
 ---
 
 ## Basic Multi-File Run
 
-Example using the three test files:
+Example using three files:
 
 ```bash
 python driver.py \
   --input storage/jfk.txt storage/alice.txt storage/rag.pdf \
-  --output storage \
+  --output storage/results_stack \
   --outputName test_stack_summary \
-  --skipWaits true
+  --parallelDevices 0,1 \
+  --parallelMode file \
+  --removeCitation true \
+  --outputTypes txt,docx,pdf
 ```
 
-This produces individual summaries for each input file and one combined survey report:
-
-```text
-storage/jfk_cleaned.txt
-storage/jfk_chunks.txt
-storage/jfk_summaries.txt
-storage/jfk_final.txt
-
-storage/alice_cleaned.txt
-storage/alice_chunks.txt
-storage/alice_summaries.txt
-storage/alice_final.txt
-
-storage/rag_cleaned.txt
-storage/rag_chunks.txt
-storage/rag_summaries.txt
-storage/rag_final.txt
-
-storage/test_stack_summary_final.txt
-storage/test_stack_summary_survey.txt
-storage/test_stack_summary_survey.docx
-storage/test_stack_summary_survey.pdf
-```
+For multi-document runs, each file is summarized individually first. The final document-level summaries are then combined into a survey-style synthesis.
 
 ---
 
-## Dual-GPU Multi-File Run
+## Output Types
 
-Use this on the dual RTX 3090 setup when the selected model fits on each GPU:
+The final report can be exported as TXT, DOCX, PDF, or any comma-separated combination of those formats.
 
 ```bash
-python driver.py \
-  --input storage/jfk.txt storage/alice.txt storage/rag.pdf \
-  --output storage \
-  --outputName test_stack_summary \
-  --skipWaits true \
-  --parallelDevices 0,1 \
-  --parallelMode file \
-  --use4Bit true
+--outputTypes txt
 ```
 
-This assigns documents across GPUs in round-robin order. For example:
-
-```text
-GPU 0: jfk.txt, then rag.pdf
-GPU 1: alice.txt
+```bash
+--outputTypes txt,docx
 ```
 
-The combined survey synthesis, introduction, conclusion, and final exports are handled after the individual document summaries are complete.
+```bash
+--outputTypes txt,docx,pdf
+```
+
+The driver always saves the final combined summary as a `.txt` file. The selected `--outputTypes` control the survey report formats.
 
 ---
 
-## Full Example Run
-
-This is the recommended capstone-style test command:
+## Full Capstone-Style Run
 
 ```bash
 python driver.py \
   --input storage/jfk.txt storage/alice.txt storage/rag.pdf \
-  --output storage \
+  --output storage/results_full \
   --outputName test_stack_summary \
-  --skipWaits true \
+  --title "Multi-Document Survey Report" \
   --parallelDevices 0,1 \
   --parallelMode file \
-  --charLimit 8000 \
+  --removeCitation true \
+  --removeUnicode true \
+  --removeSymbols true \
+  --removeStutters true \
+  --removeFillers true \
+  --excludeRepeatWords true \
   --sectionType chapter \
+  --charLimit 8000 \
   --limitPercent 0.9 \
   --overlapSize 200 \
   --orderType firstToLast \
   --use4Bit true \
+  --doSample false \
+  --sentenceLimit 10 \
   --maxNewTokens 400 \
   --repeatCharLimit 20000 \
-  --repeatMaxNewTokens 500
+  --repeatMaxRounds 5 \
+  --repeatMaxNewTokens 220 \
+  --generateIntroduction true \
+  --generateConclusion true \
+  --outputTypes txt,docx,pdf
 ```
-
-If you want to override the `.env` model directly:
-
-```bash
-python driver.py \
-  --input storage/jfk.txt storage/alice.txt storage/rag.pdf \
-  --output storage \
-  --outputName qwen3_test \
-  --model Qwen/Qwen3-8B \
-  --skipWaits true \
-  --parallelDevices 0,1 \
-  --parallelMode file \
-  --use4Bit true
-```
-
----
-
-## Output Report Format
-
-For one file, the final report is structured like:
-
-```text
-Title
-Author
-
-Introduction
-Generated or default introduction.
-
-Survey Summary
-Final summary of the document.
-
-Conclusion
-Generated or default conclusion.
-```
-
-For multiple files, the final report is structured like:
-
-```text
-Multi File Survey Report
-Author
-
-Introduction
-Generated introduction tying the document set together.
-
-Survey Summary
-Combined synthesis across all input documents.
-
-Jfk
-Individual final summary for jfk.txt.
-
-Alice
-Individual final summary for alice.txt.
-
-Rag
-Individual final summary for rag.pdf.
-
-Conclusion
-Generated conclusion tying the document set together.
-```
-
-The combined `Survey Summary` is meant to synthesize the whole document stack. The individual file sections are included for transparency and review.
 
 ---
 
@@ -377,18 +282,17 @@ The combined `Survey Summary` is meant to synthesize the whole document stack. T
 ### Input and Output
 
 ```text
---input                  One or more input files
---output                 Output directory
---outputName             Base name for final combined output files
---title                  Optional report title
---authorName             Report author name
---abstractText           Optional abstract text
---skipWaits              Skip interactive pauses
+--input            One or more input files
+--output           Output directory
+--outputName       Base name for final output files
+--outputTypes      Comma-separated report formats: txt,docx,pdf
+--dataFileName     Name of evaluator data file, default: data.txt
+--title            Optional report title
+--authorName       Optional report author name
+--abstractText     Optional abstract text
 ```
 
 ### Cleaning Arguments
-
-These map to `cleanContent`:
 
 ```text
 --removeCitation
@@ -397,10 +301,8 @@ These map to `cleanContent`:
 --removeStutters
 --removeFillers
 --excludeRepeatWords
---removeWordMorphemes
 --stutterList
 --fillerList
---morphemeList
 ```
 
 Example:
@@ -409,15 +311,13 @@ Example:
 --removeCitation true --removeUnicode true --removeSymbols true
 ```
 
-Custom word lists use comma-separated values:
+Custom filler or stutter lists use comma-separated values:
 
 ```bash
 --fillerList very,really,literally
 ```
 
 ### Chunking Arguments
-
-These map to `chunkText`:
 
 ```text
 --charLimit
@@ -426,7 +326,7 @@ These map to `chunkText`:
 --overlapSize
 ```
 
-Valid `--sectionType` values:
+Valid section types:
 
 ```text
 chapter
@@ -440,9 +340,9 @@ Example:
 --charLimit 8000 --sectionType chapter --limitPercent 0.9 --overlapSize 200
 ```
 
-### Chunk Ordering Arguments
+The current implementation uses section-aware and character-limit splitting with optional overlap. It is not a tokenizer-count chunker.
 
-This maps to `organizeChunks`:
+### Chunk Ordering Arguments
 
 ```text
 --orderType
@@ -457,9 +357,7 @@ lastToFirstBySection
 firstToLastByTop
 ```
 
-### Model Loading Arguments
-
-These map to `loadSummarizer`:
+### Model and GPU Arguments
 
 ```text
 --model
@@ -486,8 +384,6 @@ Examples:
 
 ### Summarization Arguments
 
-These map to `summarizeWithLoadedModel` and `summarizeChunk`:
-
 ```text
 --promptText
 --sentenceLimit
@@ -498,21 +394,17 @@ These map to `summarizeWithLoadedModel` and `summarizeChunk`:
 --doSample
 --temperature
 --topP
---enableThinking
---repetitionPenalty
---noRepeatNgramSize
---qualityPolish
 ```
 
-Recommended deterministic summarization:
+Recommended deterministic setting:
 
 ```bash
---doSample false --temperature 0.3 --topP 0.9
+--doSample false
 ```
 
-The `temperature` and `topP` values only matter when `--doSample true`.
+`temperature` and `topP` only affect generation when sampling is enabled.
 
-### Survey Synthesis and Report Section Arguments
+### Survey and Report Arguments
 
 ```text
 --surveyPromptText
@@ -530,18 +422,16 @@ To provide your own introduction and conclusion:
 
 ```bash
 --introductionText "This report surveys the provided documents." \
---conclusionText "Together, these sources show the main trends in the document set."
+--conclusionText "Together, these documents show the main themes in the source set."
 ```
 
-To turn off generated introduction and conclusion:
+To disable generated introduction and conclusion:
 
 ```bash
 --generateIntroduction false --generateConclusion false
 ```
 
 ### Recursive Reduction Arguments
-
-These map to `repeatSummaries`:
 
 ```text
 --repeatCharLimit
@@ -555,64 +445,83 @@ These map to `repeatSummaries`:
 Example:
 
 ```bash
---repeatCharLimit 20000 --repeatMaxRounds 5 --repeatMaxNewTokens 500
+--repeatCharLimit 20000 --repeatMaxRounds 5 --repeatMaxNewTokens 220
 ```
 
 ---
 
-## Interactive Mode
-
-By default, the driver pauses between major stages.
-
-To run without pauses:
-
-```bash
---skipWaits true
-```
-
-To keep the original step-by-step behavior, omit `--skipWaits true`.
-
----
-
-## How the Pipeline Works Internally
+## How the Pipeline Works
 
 ### 1. Ingest
 
-The input file is loaded using `loadDocument`.
+`ingest/extract.py` loads `.txt`, `.pdf`, and `.docx` files into raw text. TXT files are read with fallback encodings to better support older text documents.
 
 ### 2. Clean
 
-The raw text is cleaned with `cleanContent`, then rebuilt into a text string with `joinTokens`.
+`ingest/clean.py` applies optional cleaning steps such as citation removal, Unicode normalization, symbol cleanup, filler-word removal, stutter removal, and repeated-word filtering.
 
 ### 3. Chunk
 
-The cleaned text is split by section boundaries first. If a section is too large, it is split by character limit.
+`chunk/chunk.py` and `chunk/section.py` split the cleaned text into section-aware chunks. If a detected section is too large, the system falls back to character-limit splitting with optional overlap.
 
-### 4. Organize
+### 4. Summarize Chunks
 
-Chunks are reordered using `organizeChunks`.
+`model/summarize.py` loads the selected LLM and summarizes each chunk. Progress bars are shown when `tqdm` is installed.
 
-### 5. First Summary
+### 5. Recursive Reduction
 
-Each chunk is summarized individually.
+`model/repeat.py` combines chunk summaries into larger summaries. If the aggregated text is still too large, it is re-chunked and summarized again until a final document-level summary is produced.
 
-### 6. Recursive Reduction
+### 6. Multi-Document Synthesis
 
-Chunk summaries are merged by section and reduced until a final document-level summary remains.
+For document stacks, the final document summaries are combined into one survey-style synthesis. The report can also include generated introduction and conclusion paragraphs.
 
-### 7. Multi-Document Synthesis
+### 7. Export
 
-For multiple files, the final document-level summaries are combined and reduced into one survey-style synthesis.
+`report/output.py` exports the final report in the selected output formats.
 
-### 8. Report Generation
+---
 
-The report writer exports:
+## Generated Files
+
+Each run can produce:
 
 ```text
-.txt
-.docx
-.pdf
+<name>_cleaned.txt       Cleaned text after preprocessing
+<name>_chunks.txt        Chunked text used for summarization
+<name>_summaries.txt     First-pass chunk summaries
+<name>_final.txt         Final document or combined summary
+<name>_survey.txt        Survey report in TXT format
+<name>_survey.docx       Survey report in DOCX format
+<name>_survey.pdf        Survey report in PDF format
+data.txt                 Evaluator data log
+log.txt                  Runtime log
 ```
+
+The exact survey formats depend on `--outputTypes`.
+
+---
+
+## Evaluator Data and Logging
+
+The driver creates `data.txt` for evaluation and `log.txt` for runtime details.
+
+`data.txt` records:
+
+```text
+run configuration
+GPU throughput metrics
+word count before and after cleaning
+removed citation counts
+chunk character lengths
+chunk text before summarization
+chunk summary after summarization
+recursive reduction logs
+final survey synthesis
+introduction and conclusion text
+```
+
+`log.txt` stores detailed runtime information so the terminal can stay cleaner while preserving traceability.
 
 ---
 
@@ -620,36 +529,60 @@ The report writer exports:
 
 The dual-GPU implementation uses file-level data parallelism.
 
-It does this:
-
 ```text
 GPU 0: full model copy -> assigned documents
 GPU 1: full model copy -> assigned documents
 ```
 
-It does not do this:
-
-```text
-GPU 0 + GPU 1: one model split across both GPUs
-```
-
-This architecture is simple and appropriate for the capstone because the workload naturally consists of many documents and many chunks.
+It does not split one model across multiple GPUs. This design is simple and appropriate for the project because the workload naturally consists of multiple files and many chunks.
 
 Use file-level parallelism when:
 
 ```text
-- you have multiple input files
-- the model fits on each GPU
-- you want better throughput
+- multiple input files are being summarized
+- the selected model fits on each GPU
+- faster multi-document processing is desired
 ```
 
-Avoid file-level parallelism when:
+Use single-GPU mode when:
 
 ```text
+- summarizing one input file
 - the model barely fits on one GPU
-- the model is too large to duplicate
-- you are running only one input file
+- avoiding duplicate model loads is preferred
 ```
+
+Single-GPU example:
+
+```bash
+--parallelMode none --deviceId 0
+```
+
+Dual-GPU example:
+
+```bash
+--parallelDevices 0,1 --parallelMode file
+```
+
+---
+
+## Optional API Server
+
+The project can also be wrapped with a simple FastAPI server for file upload, job status checking, and result download. The API layer is intended to call the same `driver.py` pipeline rather than replacing it.
+
+Install API dependencies:
+
+```bash
+pip install fastapi uvicorn python-multipart
+```
+
+Run the API server:
+
+```bash
+uvicorn api_server:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+Use one worker on the GPU server so multiple API workers do not accidentally load multiple model copies and exhaust VRAM.
 
 ---
 
@@ -668,9 +601,9 @@ Try one or more of these:
 --charLimit 6000
 ```
 
-Also try a smaller model.
+Also consider a smaller model.
 
-### Model downloads every time
+### Model downloads every run
 
 Set `HF_HOME` in `.env`:
 
@@ -678,33 +611,33 @@ Set `HF_HOME` in `.env`:
 HF_HOME=/mnt/caelus/huggingface
 ```
 
-### Output contains Chinese or non-English text
+### Output contains non-English text
 
-The pipeline already tries to prevent this with English-only prompts, retry logic, CJK detection, and repair. For stricter behavior, use:
+The pipeline uses English-only prompts, CJK detection, retry behavior, and repair logic. For stricter behavior:
 
 ```bash
 --failOnNonEnglish true
 ```
 
-### Generated report is too short
+### Report is too short
 
-Increase output token limits:
+Increase token limits:
 
 ```bash
---maxNewTokens 500 --repeatMaxNewTokens 600 --reportSectionMaxNewTokens 400
+--maxNewTokens 500 --repeatMaxNewTokens 500 --reportSectionMaxNewTokens 400
 ```
 
-### Generated report is too long
+### Report is too long
 
-Decrease output token limits:
+Decrease token limits:
 
 ```bash
 --maxNewTokens 220 --repeatMaxNewTokens 220 --reportSectionMaxNewTokens 180
 ```
 
-### PDF formatting is plain
+### TXT file encoding error
 
-The PDF exporter is intentionally simple. The DOCX output is usually better for formatting and editing.
+The text loader supports common fallback encodings, including UTF-8 and Windows-style encodings. If a source text still fails to load, convert it to UTF-8 before running the pipeline.
 
 ---
 
@@ -713,25 +646,25 @@ The PDF exporter is intentionally simple. The DOCX output is usually better for 
 Single file:
 
 ```bash
-python driver.py --input storage/rag.pdf --output storage --skipWaits true
+python driver.py --input storage/rag.pdf --output storage/results_rag --outputName rag_test
 ```
 
 Multiple files:
 
 ```bash
-python driver.py --input storage/jfk.txt storage/alice.txt storage/rag.pdf --output storage --skipWaits true
+python driver.py --input storage/jfk.txt storage/alice.txt storage/rag.pdf --output storage/results_stack --outputName stack_test
 ```
 
 Multiple files with two GPUs:
 
 ```bash
-python driver.py --input storage/jfk.txt storage/alice.txt storage/rag.pdf --output storage --skipWaits true --parallelDevices 0,1 --parallelMode file
+python driver.py --input storage/jfk.txt storage/alice.txt storage/rag.pdf --output storage/results_stack --outputName stack_test --parallelDevices 0,1 --parallelMode file
 ```
 
-Override model:
+Only TXT survey output:
 
 ```bash
-python driver.py --input storage/rag.pdf --model Qwen/Qwen3-8B --skipWaits true
+python driver.py --input storage/rag.pdf --output storage/results_rag --outputName rag_test --outputTypes txt
 ```
 
 Use `.env` model:
@@ -743,6 +676,12 @@ MODEL_NAME=Qwen/Qwen3-8B
 Then run:
 
 ```bash
-python driver.py --input storage/rag.pdf --skipWaits true
+python driver.py --input storage/rag.pdf --output storage/results_rag --outputName rag_test
 ```
+
+---
+
+## Notes for Capstone Evaluation
+
+This project should be understood as a working research prototype for hierarchical document-stack summarization. It demonstrates document ingestion, configurable cleaning, chunking, local LLM summarization, recursive aggregation, multi-document survey synthesis, GPU execution, report export, and evaluator logging. Generated reports are intended as survey-style drafts or review aids and should be reviewed by a human before being used as final academic writing.
 

@@ -13,7 +13,6 @@ naturals = {',', '.', '?', '!', ';', ':', '(', ')', '[', ']', '{', '}', '"'}
 stutterWords = ["um", "uh", "oh", "er", "ah"]
 fillerWords = ["very", "really", "highly", "like", "just", "totally", "literally", "seriously"]
 repeatWords = ["really", "very", "highly", "just", "totally", "literally", "seriously", "like"]
-morphemes = ["ing", "ed", "ly", "s"]
 
 # - - - - - - - - - - #
 
@@ -36,6 +35,15 @@ def breakContent(content):
 			prevChar = content[i - 1]
 		if i + 1 < len(content):
 			nextChar = content[i + 1]
+		# save words before whitespace so words do not get glued together
+		if char.isspace():
+			if currentWord != "":
+				tokens.append(currentWord)
+				currentWord = ""
+			# preserve newlines as their own token
+			if char == "\n":
+				tokens.append("\n")
+			continue
 		# keep building word
 		if char.isalnum():
 			currentWord += char
@@ -58,8 +66,6 @@ def breakContent(content):
 						lastOpen = openStack[-1]
 						if bracketPairs[lastOpen] == char:
 							openStack.pop()
-			elif char == "\n":
-				tokens.append("\n")
 	# save final word
 	if currentWord != "":
 		tokens.append(currentWord)
@@ -163,7 +169,7 @@ def removeBadTokens(tokens):
 # - - - - - - - - - - #
 
 # remove filler and stutter words
-def removeFiller(tokens, removeStutter=False, removeFillerWords=False, stutterList=None, fillerList=None):
+def removeFiller(tokens, removeStutter=True, removeFillerWords=True, stutterList=None, fillerList=None):
 	if stutterList == None:
 		stutterList = stutterWords
 	if fillerList == None:
@@ -201,32 +207,6 @@ def removeRepetition(tokens):
 		lastWord = lowerToken
 	return newTokens
 
-# check and remove morphemes in one function
-def removeMorphemes(tokens, morphemeList=None):
-	if morphemeList == None:
-		morphemeList = morphemes
-	newTokens = []
-	morphemeWords = []
-	for token in tokens:
-		if token in naturals or token == "\n":
-			newTokens.append(token)
-			continue
-		newWord = token
-		changedWord = False
-		for morpheme in morphemeList:
-			lowerWord = newWord.lower()
-			lowerMorpheme = morpheme.lower()
-			if lowerWord.endswith(lowerMorpheme) and len(newWord) > len(morpheme):
-				morphemeWords.append(token)
-				newWord = newWord[:-len(morpheme)]
-				changedWord = True
-				break
-		if newWord != "":
-			newTokens.append(newWord)
-		elif not changedWord:
-			newTokens.append(token)
-	return newTokens, morphemeWords
-
 # clean content and return ordered array
 def cleanContent(
 	content,
@@ -239,10 +219,8 @@ def cleanContent(
 	removeWordMorphemes=False,
 	stutterList=None,
 	fillerList=None,
-	morphemeList=None
 ):
 	removedCitations = []
-	removedMorphemeWords = []
 	# clean raw string first
 	if removeUnicode:
 		content = removeBadUnicode(content)
@@ -265,9 +243,6 @@ def cleanContent(
 		)
 	if excludeRepeatWords:
 		tokens = removeRepetition(tokens)
-	if removeWordMorphemes:
-		tokens, removedMorphemeWords = removeMorphemes(tokens, morphemeList)
-	return tokens, removedCitations, removedMorphemeWords
+	return tokens, removedCitations
 
 # - - - - - - - - - - #
-
